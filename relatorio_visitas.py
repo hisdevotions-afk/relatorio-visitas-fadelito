@@ -9,7 +9,6 @@ import pandas as pd
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import gspread
 
 load_dotenv()
 
@@ -19,10 +18,9 @@ API_TIMEOUT   = int(os.getenv("API_TIMEOUT", "30"))
 DATA_INICIO   = os.getenv("DATA_INICIO", "")
 DATA_FIM      = os.getenv("DATA_FIM", "")
 
-GOOGLE_FOLDER_ID = "1hFSHZr3Mjyc3JBILEJHQydN52I2OJbQL"
+GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
 GOOGLE_SCOPES    = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
 ]
 
 STATUS_LABELS   = {"1": "Agendado", "2": "Confirmado", "3": "Realizado", "7": "Cancelado", "9": "Faltou"}
@@ -38,6 +36,8 @@ def _validate_env() -> None:
         sys.exit(f"[ERRO] Variáveis de ambiente obrigatórias não definidas: {', '.join(missing)}")
     if not os.getenv("GOOGLE_CREDENTIALS_JSON") and not os.getenv("GOOGLE_CREDENTIALS_FILE"):
         sys.exit("[ERRO] Configure GOOGLE_CREDENTIALS_JSON ou GOOGLE_CREDENTIALS_FILE.")
+    if not GOOGLE_SHEETS_ID:
+        sys.exit("[ERRO] Configure GOOGLE_SHEETS_ID com o ID da planilha.")
 
 
 def _get_google_creds() -> Credentials:
@@ -165,35 +165,46 @@ def _enrich_telefones(df: pd.DataFrame) -> None:
 
 def _save_sheets(df: pd.DataFrame, inicio: str, fim: str) -> str:
     creds  = _get_google_creds()
-    gc     = gspread.authorize(creds)
-    drive  = build("drive", "v3", credentials=creds)
     sheets = build("sheets", "v4", credentials=creds)
 
-    suffix = inicio.replace("-", "")
-    if fim != inicio:
-        suffix += f"_{fim.replace('-', '')}"
-    title = f"agendamentos_{suffix}"
+    dt_inicio = datetime.strptime(inicio, "%Y-%m-%d").strftime("%d/%m/%Y")
+    tab_title = dt_inicio if fim == inicio else (
+        f"{dt_inicio} - {datetime.strptime(fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    )
 
-    sh             = gc.create(title)
-    spreadsheet_id = sh.id
+    spreadsheet_id = GOOGLE_SHEETS_ID
 
-    drive.files().update(
-        fileId=spreadsheet_id,
-        addParents=GOOGLE_FOLDER_ID,
-        removeParents="root",
-        fields="id, parents",
+    # Remove aba existente com o mesmo nome, se houver
+    existing = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    pre_requests = []
+    for s in existing.get("sheets", []):
+        if s["properties"]["title"] == tab_title:
+            pre_requests.append({"deleteSheet": {"sheetId": s["properties"]["sheetId"]}})
+    if pre_requests:
+        sheets.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"requests": pre_requests}
+        ).execute()
+
+    # Cria nova aba
+    resp = sheets.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{"addSheet": {"properties": {"title": tab_title}}}]},
     ).execute()
+    ws_id = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
 
-    ws = sh.get_worksheet(0)
-    ws.update_title("Agendamentos")
-
+    # Escreve dados
     data = [COLUNAS] + [
         [row[col] if row[col] is not None else "" for col in COLUNAS]
         for _, row in df.iterrows()
     ]
-    ws.update(data, "A1")
+    sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{tab_title}'!A1",
+        valueInputOption="RAW",
+        body={"values": data},
+    ).execute()
 
-    ws_id = ws.id
+    # Formata: cabeçalho em negrito, colunas ajustadas, pendentes em amarelo
     batch_requests = [
         {
             "repeatCell": {
@@ -213,28 +224,17 @@ def _save_sheets(df: pd.DataFrame, inicio: str, fim: str) -> str:
             }
         },
     ]
-
     for i, (_, row) in enumerate(df.iterrows(), start=1):
         if row["Status"] in STATUS_PENDENTE:
             batch_requests.append({
                 "repeatCell": {
-                    "range": {
-                        "sheetId": ws_id,
-                        "startRowIndex": i,
-                        "endRowIndex": i + 1,
-                    },
-                    "cell": {
-                        "userEnteredFormat": {
-                            "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 0.0}
-                        }
-                    },
+                    "range": {"sheetId": ws_id, "startRowIndex": i, "endRowIndex": i + 1},
+                    "cell": {"userEnteredFormat": {"backgroundColor": {"red": 1.0, "green": 1.0, "blue": 0.0}}},
                     "fields": "userEnteredFormat.backgroundColor",
                 }
             })
-
     sheets.spreadsheets().batchUpdate(
-        spreadsheetId=spreadsheet_id,
-        body={"requests": batch_requests},
+        spreadsheetId=spreadsheet_id, body={"requests": batch_requests}
     ).execute()
 
     return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"

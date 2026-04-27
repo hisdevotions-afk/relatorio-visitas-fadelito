@@ -1,6 +1,5 @@
 requests==2.32.3
 pandas==2.2.3
 python-dotenv==1.0.1
-gspread==6.2.1
 google-auth==2.49.2
 google-api-python-client==2.194.0

@@ -26,4 +26,5 @@ jobs:
           API_BASE_URL: https://${{ secrets.GENDO_SUBDOMINIO }}.adm.gendo.app/api
           API_TOKEN: ${{ secrets.GENDO_TOKEN }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
         run: python relatorio_visitas.py
