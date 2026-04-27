@@ -21,6 +21,15 @@ jobs:
       - name: Instalar dependências
         run: pip install -r requirements.txt
 
+        name: Debug conexão        
+        run: |
+          echo "URL=$API_BASE_URL"
+          echo "TOKEN_LEN=${#API_TOKEN}"
+          curl -v -H "Authorization: Bearer $API_TOKEN" -H "Accept: application/json" "$API_BASE_URL/agendamentos?Inicio=2026-04-24&Fim=2026-04-24"
+        env:
+          API_BASE_URL: https://${{ secrets.GENDO_SUBDOMINIO }}.adm.gendo.app/api
+          API_TOKEN: ${{ secrets.GENDO_TOKEN }}
+
       - name: Gerar relatório
         env:
           API_BASE_URL: https://${{ secrets.GENDO_SUBDOMINIO }}.adm.gendo.app/api
