@@ -25,7 +25,7 @@ STATUS_LABELS   = {"1": "Agendado", "2": "Confirmado", "3": "Realizado", "7": "C
 STATUS_VALIDOS  = set(STATUS_LABELS)
 STATUS_PENDENTE = {"Agendado", "Confirmado"}  # linhas que receberão destaque amarelo
 
-COLUNAS_EXCEL = ["ID", "Data/Hora", "Paciente", "Atendente", "Serviço", "Status", "Telefone"]
+COLUNAS_EXCEL = ["ID", "Data/Hora", "Nome", "Unidade", "Serviço", "Status", "Telefone"]
 
 
 def _validate_env() -> None:
@@ -102,8 +102,8 @@ def _build_dataframe(agendamentos: list[dict]) -> pd.DataFrame:
         rows.append({
             "ID":        a.get("id"),
             "Data/Hora": _fmt_datetime(a.get("start")),
-            "Paciente":  a.get("cliente"),
-            "Atendente": a.get("atendente"),
+            "Nome":      a.get("cliente"),
+            "Unidade":   a.get("atendente"),
             "Serviço":   a.get("servico"),
             "Status":    STATUS_LABELS[a.get("status_agendamento")],
             "Telefone":  None,
