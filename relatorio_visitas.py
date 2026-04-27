@@ -3,40 +3,55 @@ import sys
 import json
 import time
 from datetime import datetime, date, timedelta
-from pathlib import Path
 
 import requests
 import pandas as pd
 from dotenv import load_dotenv
-from openpyxl.styles import PatternFill
-
-FILL_AMARELO = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+import gspread
 
 load_dotenv()
 
 API_BASE_URL  = os.getenv("API_BASE_URL", "").rstrip("/")
 API_TOKEN     = os.getenv("API_TOKEN", "")
 API_TIMEOUT   = int(os.getenv("API_TIMEOUT", "30"))
-DATA_INICIO   = os.getenv("DATA_INICIO", "")   # YYYY-MM-DD; usa hoje se vazio
-DATA_FIM      = os.getenv("DATA_FIM", "")      # YYYY-MM-DD; usa DATA_INICIO se vazio
-OUTPUT_DIR    = os.getenv("OUTPUT_DIR", ".")
+DATA_INICIO   = os.getenv("DATA_INICIO", "")
+DATA_FIM      = os.getenv("DATA_FIM", "")
+
+GOOGLE_FOLDER_ID = "1hFSHZr3Mjyc3JBILEJHQydN52I2OJbQL"
+GOOGLE_SCOPES    = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
 
 STATUS_LABELS   = {"1": "Agendado", "2": "Confirmado", "3": "Realizado", "7": "Cancelado", "9": "Faltou"}
 STATUS_VALIDOS  = set(STATUS_LABELS)
-STATUS_PENDENTE = {"Agendado", "Confirmado"}  # linhas que receberão destaque amarelo
+STATUS_PENDENTE = {"Agendado", "Confirmado"}
 
-COLUNAS_EXCEL = ["ID", "Data/Hora", "Nome", "Unidade", "Serviço", "Status", "Telefone"]
+COLUNAS = ["ID", "Data/Hora", "Nome", "Unidade", "Serviço", "Status", "Telefone"]
 
 
 def _validate_env() -> None:
     missing = [k for k in ("API_BASE_URL", "API_TOKEN") if not os.getenv(k)]
     if missing:
         sys.exit(f"[ERRO] Variáveis de ambiente obrigatórias não definidas: {', '.join(missing)}")
+    if not os.getenv("GOOGLE_CREDENTIALS_JSON") and not os.getenv("GOOGLE_CREDENTIALS_FILE"):
+        sys.exit("[ERRO] Configure GOOGLE_CREDENTIALS_JSON ou GOOGLE_CREDENTIALS_FILE.")
+
+
+def _get_google_creds() -> Credentials:
+    creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+    creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "")
+    if creds_json:
+        return Credentials.from_service_account_info(json.loads(creds_json), scopes=GOOGLE_SCOPES)
+    if creds_file:
+        return Credentials.from_service_account_file(creds_file, scopes=GOOGLE_SCOPES)
+    sys.exit("[ERRO] Credenciais do Google não configuradas.")
 
 
 def _last_business_day() -> date:
     today = date.today()
-    # Monday (weekday=0) → back 3 days to Friday; otherwise → yesterday
     delta = 3 if today.weekday() == 0 else 1
     return today - timedelta(days=delta)
 
@@ -80,16 +95,14 @@ def _fetch_agendamentos(inicio: str, fim: str) -> list[dict]:
         payload = payload["data"]
 
     if not isinstance(payload, list):
-        sys.exit(
-            f"[ERRO] Esperava lista em 'data', mas recebeu {type(payload).__name__}."
-        )
+        sys.exit(f"[ERRO] Esperava lista em 'data', mas recebeu {type(payload).__name__}.")
 
     return payload
 
 
 def _build_dataframe(agendamentos: list[dict]) -> pd.DataFrame:
     if not agendamentos:
-        return pd.DataFrame(columns=COLUNAS_EXCEL)
+        return pd.DataFrame(columns=COLUNAS)
 
     rows = []
     for a in agendamentos:
@@ -109,7 +122,7 @@ def _build_dataframe(agendamentos: list[dict]) -> pd.DataFrame:
             "Telefone":  None,
         })
 
-    return pd.DataFrame(rows, columns=COLUNAS_EXCEL)
+    return pd.DataFrame(rows, columns=COLUNAS)
 
 
 def _fmt_datetime(value: str | None) -> str | None:
@@ -137,49 +150,94 @@ def _enrich_telefones(df: pd.DataFrame) -> None:
             )
             resp.raise_for_status()
             dado = resp.json()
-
-            # Navega até o objeto de dados se a resposta vier envelopada em 'data'
             if isinstance(dado, dict) and "data" in dado:
                 dado = dado["data"]
-
             telefone = dado.get("paciente_telefone") if isinstance(dado, dict) else None
             df.at[idx, "Telefone"] = telefone
-
         except Exception as exc:
             print(f"\n[AVISO] Não foi possível buscar telefone do ID {agendamento_id}: {exc}")
 
         if i < total:
             time.sleep(0.3)
 
-    print()  # quebra a linha do \r
+    print()
 
 
-def _save_excel(df: pd.DataFrame, inicio: str, fim: str) -> Path:
-    output_path = Path(OUTPUT_DIR)
-    output_path.mkdir(parents=True, exist_ok=True)
+def _save_sheets(df: pd.DataFrame, inicio: str, fim: str) -> str:
+    creds  = _get_google_creds()
+    gc     = gspread.authorize(creds)
+    drive  = build("drive", "v3", credentials=creds)
+    sheets = build("sheets", "v4", credentials=creds)
 
     suffix = inicio.replace("-", "")
     if fim != inicio:
         suffix += f"_{fim.replace('-', '')}"
-    filepath = output_path / f"agendamentos_{suffix}.xlsx"
+    title = f"agendamentos_{suffix}"
 
-    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Agendamentos")
+    sh             = gc.create(title)
+    spreadsheet_id = sh.id
 
-        ws = writer.sheets["Agendamentos"]
-        for col_cells in ws.columns:
-            max_len = max((len(str(c.value)) if c.value else 0) for c in col_cells)
-            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 4, 60)
+    drive.files().update(
+        fileId=spreadsheet_id,
+        addParents=GOOGLE_FOLDER_ID,
+        removeParents="root",
+        fields="id, parents",
+    ).execute()
 
-        status_col_idx = COLUNAS_EXCEL.index("Status") + 1  # openpyxl é 1-based
-        num_cols = len(COLUNAS_EXCEL)
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=num_cols):
-            status_cell = row[status_col_idx - 1]
-            if status_cell.value in STATUS_PENDENTE:
-                for cell in row:
-                    cell.fill = FILL_AMARELO
+    ws = sh.get_worksheet(0)
+    ws.update_title("Agendamentos")
 
-    return filepath
+    data = [COLUNAS] + [
+        [row[col] if row[col] is not None else "" for col in COLUNAS]
+        for _, row in df.iterrows()
+    ]
+    ws.update(data, "A1")
+
+    ws_id = ws.id
+    batch_requests = [
+        {
+            "repeatCell": {
+                "range": {"sheetId": ws_id, "startRowIndex": 0, "endRowIndex": 1},
+                "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                "fields": "userEnteredFormat.textFormat.bold",
+            }
+        },
+        {
+            "autoResizeDimensions": {
+                "dimensions": {
+                    "sheetId": ws_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 0,
+                    "endIndex": len(COLUNAS),
+                }
+            }
+        },
+    ]
+
+    for i, (_, row) in enumerate(df.iterrows(), start=1):
+        if row["Status"] in STATUS_PENDENTE:
+            batch_requests.append({
+                "repeatCell": {
+                    "range": {
+                        "sheetId": ws_id,
+                        "startRowIndex": i,
+                        "endRowIndex": i + 1,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 0.0}
+                        }
+                    },
+                    "fields": "userEnteredFormat.backgroundColor",
+                }
+            })
+
+    sheets.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": batch_requests},
+    ).execute()
+
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
 
 
 def main() -> None:
@@ -196,19 +254,19 @@ def main() -> None:
     total = len(df)
 
     if total == 0:
-        print("[INFO] Nenhum agendamento válido encontrado para o período consultado. "
-              "O arquivo Excel será gerado apenas com o cabeçalho.")
+        print("[INFO] Nenhum agendamento válido encontrado para o período consultado.")
     else:
         print(f"[INFO] Buscando telefones ({total} agendamentos)...")
         _enrich_telefones(df)
 
-    filepath = _save_excel(df, inicio, fim)
+    print("[INFO] Criando planilha no Google Sheets...")
+    url = _save_sheets(df, inicio, fim)
 
     print("-" * 50)
     print(f"Período consultado   : {periodo}")
     print(f"Registros da API     : {total_bruto}")
     print(f"Agendamentos válidos : {total}  (apenas 'Visita'; excluídos bloqueios e status fora de 1/2/3/7/9)")
-    print(f"Arquivo gerado       : {filepath.resolve()}")
+    print(f"Planilha gerada      : {url}")
     print("-" * 50)
 
 

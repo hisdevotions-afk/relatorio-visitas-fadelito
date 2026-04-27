@@ -25,12 +25,5 @@ jobs:
         env:
           API_BASE_URL: https://${{ secrets.GENDO_SUBDOMINIO }}.adm.gendo.app/api
           API_TOKEN: ${{ secrets.GENDO_TOKEN }}
-          OUTPUT_DIR: ./relatorios
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: python relatorio_visitas.py
-
-      - name: Upload do Excel como artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: relatorio-visitas-${{ github.run_id }}
-          path: relatorios/*.xlsx
-          retention-days: 30
