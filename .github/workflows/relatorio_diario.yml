@@ -1,0 +1,36 @@
+name: Relatório Diário de Visitas
+
+on:
+  schedule:
+    - cron: '0 11 * * 1-5'  # 08h Brasília (UTC-3), segunda a sexta
+  workflow_dispatch:
+
+jobs:
+  gerar-relatorio:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Gerar relatório
+        env:
+          API_BASE_URL: https://${{ secrets.GENDO_SUBDOMINIO }}.adm.gendo.app/api
+          API_TOKEN: ${{ secrets.GENDO_TOKEN }}
+          OUTPUT_DIR: ./relatorios
+        run: python relatorio_visitas.py
+
+      - name: Upload do Excel como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-visitas-${{ github.run_id }}
+          path: relatorios/*.xlsx
+          retention-days: 30
