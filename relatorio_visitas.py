@@ -27,7 +27,8 @@ STATUS_LABELS   = {"1": "Agendado", "2": "Confirmado", "3": "Realizado", "7": "C
 STATUS_VALIDOS  = set(STATUS_LABELS)
 STATUS_PENDENTE = {"Agendado", "Confirmado"}
 
-COLUNAS = ["ID", "Data/Hora", "Nome", "Unidade", "Serviço", "Status", "Telefone"]
+COLUNAS = ["ID", "Data/Hora", "Nome", "Unidade", "Serviço", "Status", "Telefone",
+           "status_agente", "tentativas", "ultima_tentativa", "nova_data"]
 
 
 def _validate_env() -> None:
