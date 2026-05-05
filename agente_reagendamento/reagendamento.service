@@ -1,0 +1,15 @@
+[Unit]
+Description=Agente Reagendamento WhatsApp — servidor de webhook
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/relatorio-visitas/agente_reagendamento
+EnvironmentFile=/opt/relatorio-visitas/.env
+ExecStart=uvicorn server:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
