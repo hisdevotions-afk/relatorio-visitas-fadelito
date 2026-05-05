@@ -1,0 +1,51 @@
+name: Agente Reagendamento
+
+on:
+  schedule:
+    - cron: '30 13 * * 1-5'  # 10h30 Brasília (UTC-3), segunda a sexta
+  workflow_dispatch:
+    inputs:
+      tab:
+        description: 'Aba da planilha (dd/mm/yyyy). Deixe em branco para último dia útil.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry-run (não envia WhatsApp nem grava no Sheets)'
+        type: boolean
+        default: false
+
+jobs:
+  processar-leads:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Processar leads
+        env:
+          API_BASE_URL: https://${{ secrets.GENDO_SUBDOMINIO }}.adm.gendo.app/api
+          API_TOKEN: ${{ secrets.GENDO_TOKEN }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          ZAPI_INSTANCE_ID: ${{ secrets.ZAPI_INSTANCE_ID }}
+          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
+          ZAPI_CLIENT_TOKEN: ${{ secrets.ZAPI_CLIENT_TOKEN }}
+          WHATSAPP_SDR_NUMBER: ${{ secrets.WHATSAPP_SDR_NUMBER }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          MODO_TESTE: ${{ secrets.MODO_TESTE }}
+          WHATSAPP_TESTE_NUMBER: ${{ secrets.WHATSAPP_TESTE_NUMBER }}
+          DATA_OVERRIDE: ${{ inputs.tab }}
+        run: |
+          cd agente_reagendamento
+          ARGS="--processar"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python main.py $ARGS
