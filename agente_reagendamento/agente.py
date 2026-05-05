@@ -12,7 +12,7 @@ import config
 # ─────────────────────────────────────────────────────────────────────────────
 def _criar_llm():  # linha única a trocar
     from langchain_groq import ChatGroq
-    return ChatGroq(model="llama-3.1-70b-versatile", api_key=config.GROQ_API_KEY)
+    return ChatGroq(model="llama-3.3-70b-versatile", api_key=config.GROQ_API_KEY)
 
 
 _llm = None

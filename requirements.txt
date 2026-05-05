@@ -1,5 +1,11 @@
+# relatorio_visitas.py
 requests==2.32.3
 pandas==2.2.3
 python-dotenv==1.0.1
 google-auth==2.49.2
 google-api-python-client==2.194.0
+
+# agente_reagendamento/
+langchain>=0.3.0
+langchain-groq>=0.2.0
+langchain-anthropic>=0.3.0

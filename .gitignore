@@ -1,0 +1,32 @@
+# Credenciais e segredos
+.env
+google_credentials.json
+*.json.bak
+
+# Logs e relatórios gerados
+relatorios/
+agente_reagendamento/logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
