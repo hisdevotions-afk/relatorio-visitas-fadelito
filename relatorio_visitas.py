@@ -193,9 +193,10 @@ def _save_sheets(df: pd.DataFrame, inicio: str, fim: str) -> str:
     ).execute()
     ws_id = resp["replies"][0]["addSheet"]["properties"]["sheetId"]
 
-    # Escreve dados
+    # Escreve dados (NaN -> "" para evitar JSON inválido)
     data = [COLUNAS] + [
-        [row[col] if row[col] is not None else "" for col in COLUNAS]
+        [("" if (v := row[col]) is None or (isinstance(v, float) and pd.isna(v)) else v)
+         for col in COLUNAS]
         for _, row in df.iterrows()
     ]
     sheets.spreadsheets().values().update(
