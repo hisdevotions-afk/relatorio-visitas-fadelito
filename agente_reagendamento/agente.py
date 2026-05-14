@@ -1,4 +1,5 @@
 """Cérebro do agente: LangChain + Groq (ou Claude em produção)."""
+import json as _json
 import re
 from datetime import datetime
 
@@ -28,6 +29,7 @@ import disponibilidade
 import gendo
 import logger
 import prompts
+import rag
 
 # Histórico em memória por ID do agendamento (chave: str)
 _conversas: dict[str, list] = {}
@@ -37,6 +39,46 @@ def _historico(lead_id: str) -> list:
     if lead_id not in _conversas:
         _conversas[lead_id] = []
     return _conversas[lead_id]
+
+
+def carregar_historico(lead_id: str, json_str: str) -> None:
+    """Restaura histórico de conversa a partir do JSON salvo no Sheets (coluna L)."""
+    if not json_str:
+        return
+    try:
+        entries = _json.loads(json_str)
+    except Exception:
+        return
+    hist = _historico(lead_id)
+    hist.clear()
+    for e in entries:
+        role, content = e.get("role", ""), e.get("content", "")
+        if role == "assistant":
+            hist.append(AIMessage(content=content))
+        elif role == "user":
+            hist.append(HumanMessage(content=content))
+
+
+def serializar_historico(lead_id: str) -> str:
+    """Serializa histórico em memória para JSON (para persistir no Sheets)."""
+    hist = _historico(lead_id)
+    entries = []
+    for msg in hist:
+        if isinstance(msg, AIMessage):
+            entries.append({"role": "assistant", "content": msg.content})
+        elif isinstance(msg, HumanMessage):
+            entries.append({"role": "user", "content": msg.content})
+    return _json.dumps(entries, ensure_ascii=False)
+
+
+def registrar_mensagem_agente(lead_id: str, mensagem: str) -> None:
+    """Adiciona mensagem do agente ao histórico (inclusive tentativa 1 que não passa pelo LLM)."""
+    _historico(lead_id).append(AIMessage(content=mensagem))
+
+
+def registrar_mensagem_cliente(lead_id: str, mensagem: str) -> None:
+    """Adiciona resposta do cliente ao histórico."""
+    _historico(lead_id).append(HumanMessage(content=mensagem))
 
 
 def _invocar_llm(system: str, user: str, lead_id: str) -> str:
@@ -112,19 +154,11 @@ def gerar_mensagem_tentativa(tentativa: int, lead: dict, slots: list[dict]) -> s
             unidade=unidade,
             opcoes=opcoes_str,
         )
-        return _invocar_llm(
-            "Você é especialista em comunicação empática para escolas infantis.",
-            user_msg,
-            f"{lead_id}_t2",
-        )
+        return _invocar_llm(rag.SYSTEM_PROMPT_AGENTE, user_msg, f"{lead_id}_t2")
 
     if tentativa == 3:
         user_msg = prompts.PROMPT_TENTATIVA_3.format(nome=primeiro_nome, opcoes=opcoes_str)
-        return _invocar_llm(
-            "Você é especialista em comunicação empática para escolas infantis.",
-            user_msg,
-            f"{lead_id}_t3",
-        )
+        return _invocar_llm(rag.SYSTEM_PROMPT_AGENTE, user_msg, f"{lead_id}_t3")
 
     return ""
 
@@ -170,8 +204,13 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
                 f"[DRY-RUN] Seria criado agendamento no Gendo: {slot['data']} {slot['horario']}"
             )
 
+        resposta = prompts.MSG_CONFIRMADO.format(data_hora=nova_data, unidade=unidade)
+        maps_link = rag.get_maps_link(unidade)
+        if maps_link:
+            resposta += f"\n\n📍 Como chegar: {maps_link}"
+
         return {
-            "resposta": prompts.MSG_CONFIRMADO.format(data_hora=nova_data, unidade=unidade),
+            "resposta": resposta,
             "status_agente": "reagendado",
             "nova_data": nova_data,
             "notif_sdr": prompts.NOTIF_SDR_REAGENDADO.format(
@@ -184,7 +223,7 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             "resposta": prompts.MSG_QUER_LIGAR,
             "status_agente": "reagendado",
             "nova_data": "",
-            "notif_sdr": prompts.NOTIF_SDR_LIGAR.format(nome=nome, telefone=telefone),
+            "notif_sdr": prompts.NOTIF_SDR_LIGAR.format(nome=nome, unidade=unidade, telefone=telefone),
         }
 
     if "RECUSOU" in categoria:
@@ -199,11 +238,8 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         opcoes_alt = "\n".join(f"🗓 {s['label']}" for s in slots)
         preferencia = data_info or "outro horário"
         msg_neg = _invocar_llm(
-            "Você é especialista em reagendamento de visitas escolares. Seja empático e objetivo.",
-            (
-                f"O cliente {nome.split()[0]} prefere {preferencia}. "
-                f"Ofereça estas alternativas de forma empática (máximo 3 linhas):\n{opcoes_alt}"
-            ),
+            rag.SYSTEM_PROMPT_AGENTE,
+            f"O lead quer {preferencia}. Ofereça estas alternativas de forma empática (máximo 3 linhas):\n{opcoes_alt}",
             lead_id,
         )
         return {
@@ -215,11 +251,8 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
 
     # INDEFINIDO
     resp_indef = _invocar_llm(
-        "Você é especialista em reagendamento de visitas escolares. Seja empático e objetivo.",
-        (
-            f"O cliente {nome.split()[0]} enviou: '{mensagem_cliente}'. "
-            "Mantenha foco no reagendamento (máximo 3 linhas)."
-        ),
+        rag.SYSTEM_PROMPT_AGENTE,
+        "Responda à mensagem acima mantendo foco no reagendamento (máximo 3 linhas).",
         lead_id,
     )
     return {

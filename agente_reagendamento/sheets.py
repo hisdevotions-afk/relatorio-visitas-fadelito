@@ -9,12 +9,13 @@ from googleapiclient.discovery import build
 import config
 import logger
 
-# Colunas de controle do agente (H–K, índice 0-based = 7–10)
+# Colunas de controle do agente (H–L, índice 0-based = 7–11)
 CABECALHO_AGENTE = [
     "status_agente",    # H
     "tentativas",       # I
     "ultima_tentativa", # J
     "nova_data",        # K
+    "log_conversa",     # L
 ]
 
 
@@ -90,7 +91,7 @@ def ensure_agent_columns(aba: str | None = None) -> None:
     try:
         res = svc.spreadsheets().values().get(
             spreadsheetId=config.GOOGLE_SHEETS_ID,
-            range=f"'{aba}'!H1:K1",
+            range=f"'{aba}'!H1:L1",
         ).execute()
         atual = (res.get("values") or [[]])[0]
     except Exception:
@@ -98,11 +99,11 @@ def ensure_agent_columns(aba: str | None = None) -> None:
 
     if atual != CABECALHO_AGENTE:
         if config.DRY_RUN:
-            logger.info(f"[DRY-RUN] Seria gravado cabeçalho agente em '{aba}'!H1:K1")
+            logger.info(f"[DRY-RUN] Seria gravado cabeçalho agente em '{aba}'!H1:L1")
             return
         svc.spreadsheets().values().update(
             spreadsheetId=config.GOOGLE_SHEETS_ID,
-            range=f"'{aba}'!H1:K1",
+            range=f"'{aba}'!H1:L1",
             valueInputOption="RAW",
             body={"values": [CABECALHO_AGENTE]},
         ).execute()
@@ -157,6 +158,7 @@ def update_lead_agente(aba: str, row_index: int, **kwargs) -> None:
         "tentativas":       8,
         "ultima_tentativa": 9,
         "nova_data":        10,
+        "log_conversa":     11,
     }
 
     data = []

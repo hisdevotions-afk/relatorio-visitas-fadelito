@@ -23,7 +23,7 @@ PRIMEIRA_MENSAGEM_TESTE = "Olá [PRIMEIRO_NOME]! Teste do agente de reagendament
 PROMPT_TENTATIVA_2 = (
     "Gere uma mensagem de segundo contato em português brasileiro para {nome} que cancelou/faltou "
     "uma visita escolar em {data_original} na unidade {unidade}. "
-    "Tom: propositivo, reforça valor da visita presencial, menciona vagas limitadas. "
+    "Tom: propositivo, empático, reforça o valor da visita presencial, leve senso de disponibilidade (sem urgência forçada). "
     "Máximo 4 linhas. Inclua as seguintes opções de horário:\n{opcoes}\n"
     "Nunca soar como robô. Retorne apenas o texto da mensagem."
 )
@@ -57,8 +57,11 @@ Se CONFIRMOU_DATA ou QUER_NEGOCIAR, na segunda linha escreva: DATA: <data e hor�
 # ── Respostas fixas ao cliente ────────────────────────────────────────────────
 
 MSG_CONFIRMADO = (
-    "Perfeito! Visita confirmada para {data_hora} na {unidade}.\n"
-    "Te esperamos! Qualquer dúvida, estamos aqui. 💙"
+    "Perfeito! Visita confirmada para {data_hora} na unidade Fadelito {unidade}. 💙\n\n"
+    "Quais os nomes das pessoas que virão à visita? (para liberar na portaria)\n"
+    "E me informe um e-mail, por favor 🙂\n\n"
+    "A diretora irá recebê-los. Por segurança, pedimos que apresentem um documento com foto na portaria.\n\n"
+    "Te esperamos! 💙💛"
 )
 
 MSG_QUER_LIGAR = (
@@ -74,5 +77,5 @@ MSG_RECUSOU = (
 # ── Notificações para o SDR ───────────────────────────────────────────────────
 
 NOTIF_SDR_REAGENDADO = "✅ *Reagendado* | {nome} | {data_hora} | {unidade} | Tel: {telefone}"
-NOTIF_SDR_LIGAR = "📞 *Ligar agora* | {nome} quer falar por telefone | Tel: {telefone}"
+NOTIF_SDR_LIGAR = "📞 *Ligar agora* | {nome} quer falar por telefone | {unidade} | Tel: {telefone}"
 NOTIF_SDR_PERDIDO = "❌ *Sem retorno* | {nome} | 3 tentativas | Tel: {telefone}"

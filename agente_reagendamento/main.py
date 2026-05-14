@@ -123,12 +123,15 @@ def _processar_lead(lead: dict, agora: datetime, teste_simples: bool = False) ->
     logger.log_conversa(lead_id, nome, "AGENTE→CLIENTE", mensagem)
 
     agora_iso = agora.isoformat()
+    agente.carregar_historico(lead_id, lead.get("log_conversa", ""))
+    agente.registrar_mensagem_agente(lead_id, mensagem)
     sh.update_lead_agente(
         lead["aba"],
         lead["row_index"],
         status_agente=proximo_status,
         tentativas=tentativa_num,
         ultima_tentativa=agora_iso,
+        log_conversa=agente.serializar_historico(lead_id),
     )
 
     logger.info(f"Mensagem enviada para {nome} (ID {lead_id}), tentativa {tentativa_num}")
@@ -217,17 +220,27 @@ def _tratar_resposta(lead: dict, mensagem: str, aba: str) -> None:
     if lead["status_agente"] in ("reagendado", "perdido"):
         return
 
-    resultado = agente.processar_resposta_cliente(lead, mensagem)
-    agora_iso = datetime.now().isoformat()
     lead_id = str(lead["id"])
     nome = lead["nome"]
+
+    # Restaura histórico da sessão anterior e registra mensagem do cliente
+    agente.carregar_historico(lead_id, lead.get("log_conversa", ""))
+    agente.registrar_mensagem_cliente(lead_id, mensagem)
+
+    resultado = agente.processar_resposta_cliente(lead, mensagem)
+    agora_iso = datetime.now().isoformat()
 
     logger.log_conversa(lead_id, nome, "CLIENTE→AGENTE", mensagem)
     logger.log_conversa(lead_id, nome, "AGENTE→CLIENTE", resultado["resposta"])
 
+    # Caminhos sem LLM (confirmado/recusado/ligar) não atualizam _conversas — registra manualmente
+    if resultado["status_agente"] in ("reagendado", "perdido"):
+        agente.registrar_mensagem_agente(lead_id, resultado["resposta"])
+
     updates = {
         "status_agente": resultado["status_agente"],
         "ultima_tentativa": agora_iso,
+        "log_conversa": agente.serializar_historico(lead_id),
     }
     if resultado.get("nova_data"):
         updates["nova_data"] = resultado["nova_data"]
