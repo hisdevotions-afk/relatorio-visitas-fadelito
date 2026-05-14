@@ -2,7 +2,7 @@ name: Relatório Diário de Visitas
 
 on:
   schedule:
-    - cron: '0 13 * * 1-5'  # 10h Brasília (UTC-3), segunda a sexta
+    - cron: '0 15 * * 1-5'  # 12h Brasília (UTC-3), segunda a sexta
   workflow_dispatch:
 
 jobs:
