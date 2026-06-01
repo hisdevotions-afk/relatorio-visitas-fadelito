@@ -1,0 +1,42 @@
+name: Watchdog — Relatório Diário
+
+on:
+  schedule:
+    - cron: '0 20 * * 1-5'  # 17h Brasília (UTC-3) — 5h após o horário principal
+  workflow_dispatch:
+
+jobs:
+  verificar-e-disparar:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+
+    steps:
+      - name: Verificar se o relatório rodou hoje
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          COUNT=$(gh run list \
+            --repo ${{ github.repository }} \
+            --workflow=relatorio_diario.yml \
+            --created="$TODAY" \
+            --status=success \
+            --limit=1 \
+            --json databaseId \
+            --jq 'length')
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Runs bem-sucedidos hoje ($TODAY): $COUNT"
+
+      - name: Disparar relatório se não rodou
+        if: steps.check.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Relatório não rodou hoje — disparando agora..."
+          gh workflow run relatorio_diario.yml --repo ${{ github.repository }}
+
+      - name: Relatório já rodou hoje
+        if: steps.check.outputs.count != '0'
+        run: echo "Relatório já rodou com sucesso hoje. Nada a fazer."
