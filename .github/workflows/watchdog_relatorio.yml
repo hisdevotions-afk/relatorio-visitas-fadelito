@@ -2,7 +2,7 @@ name: Watchdog — Relatório Diário
 
 on:
   schedule:
-    - cron: '0 20 * * 1-5'  # 17h Brasília (UTC-3) — 5h após o horário principal
+    - cron: '20 19 * * 1-5'  # 16h20 Brasília (UTC-3) — 4h20 após o horário principal
   workflow_dispatch:
 
 jobs:
