@@ -93,7 +93,10 @@ def _invocar_llm(system: str, user: str, lead_id: str) -> str:
 
 def _classificar_resposta(mensagem: str, slots: list[dict], lead_id: str) -> tuple[str, str]:
     """Retorna (categoria, data_info). Não grava histórico de conversa."""
-    opcoes_str = "\n".join(f"- {s['label']}" for s in slots)
+    opcoes_partes = ["1 - Quero reagendar", "2 - Optei por outra escola"]
+    if slots:
+        opcoes_partes += [f"- {s['label']}" for s in slots]
+    opcoes_str = "\n".join(opcoes_partes)
     prompt = prompts.PROMPT_CLASSIFICAR.format(opcoes=opcoes_str, mensagem=mensagem)
     # Usa lead_id com sufixo para não contaminar o histórico de negociação
     resp = _invocar_llm("Você é um classificador preciso. Seja conciso.", prompt, f"{lead_id}_clf")
@@ -136,13 +139,7 @@ def gerar_mensagem_tentativa(tentativa: int, lead: dict, slots: list[dict]) -> s
         opcoes_labels.append("(sem disponibilidade)")
 
     if tentativa == 1:
-        return prompts.MENSAGEM_TENTATIVA_1.format(
-            primeiro_nome=primeiro_nome,
-            unidade=unidade,
-            opcao_1=opcoes_labels[0],
-            opcao_2=opcoes_labels[1],
-            opcao_3=opcoes_labels[2],
-        )
+        return prompts.MENSAGEM_TENTATIVA_1.format(primeiro_nome=primeiro_nome)
 
     opcoes_str = "\n".join(f"- {o}" for o in opcoes_labels[:3])
     lead_id = str(lead["id"])
@@ -180,6 +177,21 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
 
     categoria, data_info = _classificar_resposta(mensagem_cliente, slots, lead_id)
     logger.info(f"Lead {lead_id} ({nome}): classificação = {categoria}")
+
+    if "QUER_REAGENDAR" in categoria:
+        opcoes_labels = [s["label"] for s in slots]
+        while len(opcoes_labels) < 3:
+            opcoes_labels.append("(sem disponibilidade)")
+        return {
+            "resposta": prompts.MSG_ENVIAR_SLOTS.format(
+                opcao_1=opcoes_labels[0],
+                opcao_2=opcoes_labels[1],
+                opcao_3=opcoes_labels[2],
+            ),
+            "status_agente": lead["status_agente"],
+            "nova_data": "",
+            "notif_sdr": None,
+        }
 
     if "CONFIRMOU_DATA" in categoria:
         slot = _encontrar_slot(data_info, slots)

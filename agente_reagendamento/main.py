@@ -119,7 +119,11 @@ def _processar_lead(lead: dict, agora: datetime, teste_simples: bool = False) ->
     if not mensagem:
         return False
 
-    wa.send_message(telefone, mensagem)
+    if tentativa_num == 1 and not teste_simples:
+        primeiro_nome = nome.split()[0] if nome else "Cliente"
+        wa.send_template(telefone, primeiro_nome)
+    else:
+        wa.send_message(telefone, mensagem)
     logger.log_conversa(lead_id, nome, "AGENTE→CLIENTE", mensagem)
 
     agora_iso = agora.isoformat()

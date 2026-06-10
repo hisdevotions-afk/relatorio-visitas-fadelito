@@ -1,4 +1,4 @@
-"""Servidor HTTP para receber webhooks do Z-API (respostas dos clientes via WhatsApp)."""
+"""Servidor HTTP para receber webhooks do Gupshup (respostas dos clientes via WhatsApp)."""
 import sys
 from pathlib import Path
 

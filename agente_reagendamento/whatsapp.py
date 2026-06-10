@@ -1,4 +1,5 @@
-"""Envio de mensagens via Z-API (WhatsApp)."""
+"""Envio de mensagens via Gupshup WhatsApp Business API."""
+import json
 import time
 import requests
 
@@ -6,6 +7,8 @@ import config
 import logger
 
 _RETRYABLE = frozenset({429}) | frozenset(range(500, 600))
+_GUPSHUP_URL = "https://api.gupshup.io/wa/api/v1/msg"
+_GUPSHUP_TEMPLATE_URL = "https://api.gupshup.io/wa/api/v1/template/msg"
 
 
 def _normalizar_telefone(tel: str) -> str:
@@ -23,54 +26,116 @@ def _destino(para: str) -> str:
 
 
 def send_message(para: str, texto: str) -> dict:
-    """Envia mensagem de texto via Z-API. Respeita dry-run e modo teste."""
+    """Envia mensagem de texto via Gupshup. Respeita dry-run e modo teste."""
     numero = _destino(para)
 
     if config.DRY_RUN:
         logger.info(f"[DRY-RUN] Seria enviado para {numero}:\n{texto}")
         return {}
 
-    url = (
-        f"https://api.z-api.io/instances/{config.ZAPI_INSTANCE_ID}"
-        f"/token/{config.ZAPI_TOKEN}/send-text"
-    )
     headers = {
-        "Client-Token": config.ZAPI_CLIENT_TOKEN,
-        "Content-Type": "application/json",
+        "apikey": config.WHATSAPP_API_TOKEN,
+        "Content-Type": "application/x-www-form-urlencoded",
     }
-    payload = {"phone": numero, "message": texto}
+    data = {
+        "channel": "whatsapp",
+        "source": config.WHATSAPP_SOURCE_NUMBER,
+        "destination": numero,
+        "message": json.dumps({"type": "text", "text": texto}),
+        "src.name": config.WHATSAPP_APP_NAME,
+    }
 
     last_err: Exception | None = None
     for attempt in range(3):
         if attempt:
-            time.sleep(2 ** (attempt - 1))  # 1s após 1ª falha, 2s após 2ª
+            time.sleep(2 ** (attempt - 1))
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            resp = requests.post(_GUPSHUP_URL, headers=headers, data=data, timeout=30)
         except requests.exceptions.RequestException as exc:
             last_err = exc
-            logger.aviso(f"Z-API erro de rede, tentativa {attempt + 1}/3: {exc}")
+            logger.aviso(f"Gupshup erro de rede, tentativa {attempt + 1}/3: {exc}")
             continue
 
         if resp.status_code in _RETRYABLE:
             last_err = requests.exceptions.HTTPError(
                 f"HTTP {resp.status_code}", response=resp
             )
-            logger.aviso(f"Z-API status {resp.status_code}, tentativa {attempt + 1}/3")
+            logger.aviso(f"Gupshup status {resp.status_code}, tentativa {attempt + 1}/3")
             continue
 
         try:
             resp.raise_for_status()
         except requests.exceptions.HTTPError as exc:
-            logger.erro(f"Z-API erro {resp.status_code}: {exc}\n{resp.text}")
+            logger.erro(f"Gupshup erro {resp.status_code}: {exc}\n{resp.text}")
             raise
 
-        data = resp.json()
-        message_id = data.get("messageId") or data.get("zaapId") or data.get("id", "")
-        print(f"[INFO] Z-API: mensagem enviada para {numero} | ID: {message_id}")
-        return data
+        data_resp = resp.json()
+        message_id = data_resp.get("messageId", "")
+        print(f"[INFO] Gupshup: mensagem enviada para {numero} | ID: {message_id}")
+        return data_resp
 
-    logger.erro(f"Z-API: 3 tentativas esgotadas para {numero}")
-    raise last_err or RuntimeError("Z-API: falha desconhecida")
+    logger.erro(f"Gupshup: 3 tentativas esgotadas para {numero}")
+    raise last_err or RuntimeError("Gupshup: falha desconhecida")
+
+
+def send_template(para: str, primeiro_nome: str) -> dict:
+    """Envia template aprovado via endpoint dedicado de templates do Gupshup.
+
+    O endpoint /wa/api/v1/msg NÃO processa templates (entrega o JSON como texto
+    literal); o /wa/api/v1/template/msg recebe o UUID do template aprovado.
+    """
+    numero = _destino(para)
+
+    if config.DRY_RUN:
+        logger.info(f"[DRY-RUN] Seria enviado template para {numero} | nome={primeiro_nome}")
+        return {}
+
+    headers = {
+        "apikey": config.WHATSAPP_API_TOKEN,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    data = {
+        "channel": "whatsapp",
+        "source": config.WHATSAPP_SOURCE_NUMBER,
+        "destination": numero,
+        "template": json.dumps({
+            "id": config.WHATSAPP_TEMPLATE_ID,
+            "params": [primeiro_nome],
+        }),
+        "src.name": config.WHATSAPP_APP_NAME,
+    }
+
+    last_err: Exception | None = None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(2 ** (attempt - 1))
+        try:
+            resp = requests.post(_GUPSHUP_TEMPLATE_URL, headers=headers, data=data, timeout=30)
+        except requests.exceptions.RequestException as exc:
+            last_err = exc
+            logger.aviso(f"Gupshup template erro de rede, tentativa {attempt + 1}/3: {exc}")
+            continue
+
+        if resp.status_code in _RETRYABLE:
+            last_err = requests.exceptions.HTTPError(
+                f"HTTP {resp.status_code}", response=resp
+            )
+            logger.aviso(f"Gupshup template status {resp.status_code}, tentativa {attempt + 1}/3")
+            continue
+
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            logger.erro(f"Gupshup template erro {resp.status_code}: {exc}\n{resp.text}")
+            raise
+
+        data_resp = resp.json()
+        message_id = data_resp.get("messageId", "")
+        print(f"[INFO] Gupshup: template enviado para {numero} | ID: {message_id}")
+        return data_resp
+
+    logger.erro(f"Gupshup template: 3 tentativas esgotadas para {numero}")
+    raise last_err or RuntimeError("Gupshup template: falha desconhecida")
 
 
 def notify_sdr(mensagem: str) -> None:
@@ -84,19 +149,23 @@ def notify_sdr(mensagem: str) -> None:
 
 
 def parse_webhook(payload: dict) -> list[dict]:
-    """Extrai mensagens do payload do webhook Z-API.
+    """Extrai mensagens do payload do webhook Gupshup.
 
-    Retorna lista de {"from": "...", "text": "...", "timestamp": "...", "message_id": "..."}
+    Formato esperado:
+    {"type": "message", "payload": {"type": "text", "source": "55...",
+     "payload": {"text": "..."}, "id": "...", ...}, "timestamp": ...}
     """
-    if payload.get("fromMe") or payload.get("isGroup"):
+    if payload.get("type") != "message":
         return []
-    text_obj = payload.get("text", {})
-    body = text_obj.get("message", "") if isinstance(text_obj, dict) else ""
-    if not body:
+    inner = payload.get("payload", {})
+    if inner.get("type") != "text":
+        return []
+    text = inner.get("payload", {}).get("text", "")
+    if not text:
         return []
     return [{
-        "from": payload.get("phone", ""),
-        "text": body,
-        "timestamp": str(payload.get("momment", "")),
-        "message_id": payload.get("messageId", ""),
+        "from": inner.get("source", ""),
+        "text": text,
+        "timestamp": str(payload.get("timestamp", "")),
+        "message_id": inner.get("id", ""),
     }]

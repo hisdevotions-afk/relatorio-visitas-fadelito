@@ -36,9 +36,12 @@ jobs:
           API_TOKEN: ${{ secrets.GENDO_TOKEN }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
-          ZAPI_INSTANCE_ID: ${{ secrets.ZAPI_INSTANCE_ID }}
-          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-          ZAPI_CLIENT_TOKEN: ${{ secrets.ZAPI_CLIENT_TOKEN }}
+          WHATSAPP_API_TOKEN: ${{ secrets.WHATSAPP_API_TOKEN }}
+          WHATSAPP_WABA_ID: ${{ secrets.WHATSAPP_WABA_ID }}
+          WHATSAPP_SOURCE_NUMBER: ${{ secrets.WHATSAPP_SOURCE_NUMBER }}
+          WHATSAPP_APP_NAME: ${{ secrets.WHATSAPP_APP_NAME }}
+          WHATSAPP_TEMPLATE_NAME: ${{ secrets.WHATSAPP_TEMPLATE_NAME }}
+          WHATSAPP_TEMPLATE_ID: ${{ secrets.WHATSAPP_TEMPLATE_ID }}
           WHATSAPP_SDR_NUMBER: ${{ secrets.WHATSAPP_SDR_NUMBER }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           MODO_TESTE: ${{ secrets.MODO_TESTE }}

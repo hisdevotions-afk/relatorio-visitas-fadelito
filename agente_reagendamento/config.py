@@ -22,11 +22,14 @@ API_TIMEOUT = int(os.getenv("API_TIMEOUT", "30"))
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-# ── WhatsApp Z-API ────────────────────────────────────────────────────────────
-ZAPI_INSTANCE_ID = os.getenv("ZAPI_INSTANCE_ID", "")
-ZAPI_TOKEN = os.getenv("ZAPI_TOKEN", "")
-ZAPI_CLIENT_TOKEN = os.getenv("ZAPI_CLIENT_TOKEN", "")
+# ── WhatsApp Business Cloud API (via Gupshup) ─────────────────────────────────
+WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN", "")
+WHATSAPP_WABA_ID = os.getenv("WHATSAPP_WABA_ID", "")
+WHATSAPP_SOURCE_NUMBER = os.getenv("WHATSAPP_SOURCE_NUMBER", "")
+WHATSAPP_APP_NAME = os.getenv("WHATSAPP_APP_NAME", "")
 SDR_NUMBER = os.getenv("WHATSAPP_SDR_NUMBER", "")
+WHATSAPP_TEMPLATE_NAME = os.getenv("WHATSAPP_TEMPLATE_NAME", "")
+WHATSAPP_TEMPLATE_ID = os.getenv("WHATSAPP_TEMPLATE_ID", "")
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")

@@ -1,13 +1,20 @@
 """Templates de mensagem e prompts para o LLM."""
 
-# ── Tentativa 1 (mensagem fixa, sem LLM) ─────────────────────────────────────
+# ── Tentativa 1 (template fixo, sem LLM) ─────────────────────────────────────
 
 MENSAGEM_TENTATIVA_1 = (
     "Olá, {primeiro_nome}. Vocês fizeram falta na nossa visita! 💙💛\n\n"
     "Desejo que esteja tudo bem com a sua família.\n\n"
     "A rotina com os pequenos pode mudar a qualquer momento, e entendemos isso com empatia.\n\n"
-    "Será um prazer recebê-los e mostrar cada detalhe da nossa unidade {unidade}.\n\n"
-    "Que tal remarcarmos? Temos os seguintes horários disponíveis:\n"
+    "Será um prazer recebê-los e mostrar cada detalhe da nossa unidade.\n\n"
+    "1 - Quero reagendar\n"
+    "2 - Optei por outra escola"
+)
+
+# ── Horários enviados após lead responder "1" ─────────────────────────────────
+
+MSG_ENVIAR_SLOTS = (
+    "Ótimo! Temos os seguintes horários disponíveis:\n"
     "🗓 {opcao_1}\n"
     "🗓 {opcao_2}\n"
     "🗓 {opcao_3}\n\n"
@@ -39,16 +46,17 @@ PROMPT_TENTATIVA_3 = (
 
 PROMPT_CLASSIFICAR = """Você classifica respostas de clientes em um contexto de reagendamento de visita escolar.
 
-Opções oferecidas ao cliente:
+Opções apresentadas ao cliente:
 {opcoes}
 
 Mensagem do cliente: "{mensagem}"
 
 Classifique em EXATAMENTE UMA categoria:
-- CONFIRMOU_DATA: escolheu opção oferecida ou sugeriu data/horário específico
-- QUER_NEGOCIAR: pediu horário diferente dos oferecidos
+- QUER_REAGENDAR: respondeu "1", quer reagendar ou expressou interesse em remarcar
+- RECUSOU: respondeu "2", optou por outra escola ou não quer reagendar
+- CONFIRMOU_DATA: escolheu horário específico dentre os oferecidos ou sugeriu data/horário concreto
+- QUER_NEGOCIAR: pediu horário diferente dos apresentados
 - QUER_LIGAR: prefere contato telefônico
-- RECUSOU: não quer reagendar
 - INDEFINIDO: resposta vaga ou sem relação com reagendamento
 
 Responda SOMENTE com a categoria na primeira linha.
