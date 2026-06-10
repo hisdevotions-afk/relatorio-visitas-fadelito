@@ -91,15 +91,42 @@ def _invocar_llm(system: str, user: str, lead_id: str) -> str:
     return conteudo
 
 
+def _invocar_llm_instrucao(system: str, instrucao: str, lead_id: str) -> str:
+    """Invoca o LLM com o histórico real da conversa + instrução interna.
+
+    A instrução NÃO entra no histórico — só a resposta gerada. Assim a
+    coluna L fica fiel ao que cliente e agente realmente trocaram.
+    """
+    hist = _historico(lead_id)
+    msgs = [SystemMessage(content=system)] + hist + [HumanMessage(content=instrucao)]
+    resp = _get_llm().invoke(msgs)
+    conteudo = resp.content.strip()
+    hist.append(AIMessage(content=conteudo))
+    return conteudo
+
+
+def _ultima_mensagem_agente(lead_id: str) -> str:
+    hist = _historico(lead_id)
+    return next(
+        (m.content for m in reversed(hist) if isinstance(m, AIMessage)), ""
+    )
+
+
 def _classificar_resposta(mensagem: str, slots: list[dict], lead_id: str) -> tuple[str, str]:
     """Retorna (categoria, data_info). Não grava histórico de conversa."""
     opcoes_partes = ["1 - Quero reagendar", "2 - Optei por outra escola"]
     if slots:
         opcoes_partes += [f"- {s['label']}" for s in slots]
     opcoes_str = "\n".join(opcoes_partes)
-    prompt = prompts.PROMPT_CLASSIFICAR.format(opcoes=opcoes_str, mensagem=mensagem)
-    # Usa lead_id com sufixo para não contaminar o histórico de negociação
-    resp = _invocar_llm("Você é um classificador preciso. Seja conciso.", prompt, f"{lead_id}_clf")
+    prompt = prompts.PROMPT_CLASSIFICAR.format(
+        opcoes=opcoes_str,
+        contexto=_ultima_mensagem_agente(lead_id) or "(nenhuma)",
+        mensagem=mensagem,
+    )
+    resp = _get_llm().invoke([
+        SystemMessage(content="Você é um classificador preciso. Seja conciso."),
+        HumanMessage(content=prompt),
+    ]).content.strip()
     linhas = resp.strip().splitlines()
     categoria = linhas[0].strip()
     data_info = ""
@@ -107,6 +134,21 @@ def _classificar_resposta(mensagem: str, slots: list[dict], lead_id: str) -> tup
         if linha.startswith("DATA:"):
             data_info = linha.replace("DATA:", "").strip()
     return categoria, data_info
+
+
+def _escolha_de_slot(mensagem: str, slots: list[dict], lead_id: str) -> dict | None:
+    """Detecta escolha de slot por número simples (ex.: "1", "2", "3").
+
+    Só vale quando a última mensagem do agente foi a lista de horários —
+    fora desse contexto, "1"/"2" são as opções reagendar/recusar do template.
+    """
+    m = re.fullmatch(r"\s*(\d)\s*[.!]?\s*", mensagem or "")
+    if not m or not slots:
+        return None
+    if "horários disponíveis" not in _ultima_mensagem_agente(lead_id):
+        return None
+    idx = int(m.group(1)) - 1
+    return slots[idx] if 0 <= idx < len(slots) else None
 
 
 def _encontrar_slot(data_info: str, slots: list[dict]) -> dict | None:
@@ -175,19 +217,29 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
     telefone = lead["telefone"]
     slots = disponibilidade.get_slots_disponiveis(3)
 
-    categoria, data_info = _classificar_resposta(mensagem_cliente, slots, lead_id)
+    slot_direto = _escolha_de_slot(mensagem_cliente, slots, lead_id)
+    if slot_direto:
+        categoria = "CONFIRMOU_DATA"
+        data_info = (
+            datetime.strptime(slot_direto["data"], "%Y-%m-%d").strftime("%d/%m/%Y")
+            + " " + slot_direto["horario"]
+        )
+    else:
+        categoria, data_info = _classificar_resposta(mensagem_cliente, slots, lead_id)
     logger.info(f"Lead {lead_id} ({nome}): classificação = {categoria}")
 
     if "QUER_REAGENDAR" in categoria:
         opcoes_labels = [s["label"] for s in slots]
         while len(opcoes_labels) < 3:
             opcoes_labels.append("(sem disponibilidade)")
+        resposta = prompts.MSG_ENVIAR_SLOTS.format(
+            opcao_1=opcoes_labels[0],
+            opcao_2=opcoes_labels[1],
+            opcao_3=opcoes_labels[2],
+        )
+        registrar_mensagem_agente(lead_id, resposta)
         return {
-            "resposta": prompts.MSG_ENVIAR_SLOTS.format(
-                opcao_1=opcoes_labels[0],
-                opcao_2=opcoes_labels[1],
-                opcao_3=opcoes_labels[2],
-            ),
+            "resposta": resposta,
             "status_agente": lead["status_agente"],
             "nova_data": "",
             "notif_sdr": None,
@@ -221,6 +273,7 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         if maps_link:
             resposta += f"\n\n📍 Como chegar: {maps_link}"
 
+        registrar_mensagem_agente(lead_id, resposta)
         return {
             "resposta": resposta,
             "status_agente": "reagendado",
@@ -231,6 +284,7 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         }
 
     if "QUER_LIGAR" in categoria:
+        registrar_mensagem_agente(lead_id, prompts.MSG_QUER_LIGAR)
         return {
             "resposta": prompts.MSG_QUER_LIGAR,
             "status_agente": "reagendado",
@@ -239,19 +293,21 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         }
 
     if "RECUSOU" in categoria:
+        registrar_mensagem_agente(lead_id, prompts.MSG_RECUSOU)
         return {
             "resposta": prompts.MSG_RECUSOU,
             "status_agente": "perdido",
             "nova_data": "",
-            "notif_sdr": prompts.NOTIF_SDR_PERDIDO.format(nome=nome, telefone=telefone),
+            "notif_sdr": prompts.NOTIF_SDR_RECUSOU.format(nome=nome, telefone=telefone),
         }
 
     if "QUER_NEGOCIAR" in categoria:
         opcoes_alt = "\n".join(f"🗓 {s['label']}" for s in slots)
         preferencia = data_info or "outro horário"
-        msg_neg = _invocar_llm(
+        msg_neg = _invocar_llm_instrucao(
             rag.SYSTEM_PROMPT_AGENTE,
-            f"O lead quer {preferencia}. Ofereça estas alternativas de forma empática (máximo 3 linhas):\n{opcoes_alt}",
+            f"O lead quer {preferencia}. Ofereça estas alternativas de forma empática "
+            f"(máximo 3 linhas):\n{opcoes_alt}",
             lead_id,
         )
         return {
@@ -261,10 +317,13 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             "notif_sdr": None,
         }
 
-    # INDEFINIDO
-    resp_indef = _invocar_llm(
+    # INDEFINIDO — perguntas ou respostas vagas: responde com a base de conhecimento
+    resp_indef = _invocar_llm_instrucao(
         rag.SYSTEM_PROMPT_AGENTE,
-        "Responda à mensagem acima mantendo foco no reagendamento (máximo 3 linhas).",
+        "Responda à última mensagem do cliente usando APENAS a base de conhecimento "
+        "(nunca invente valores, vagas ou horários). Se for pergunta, responda de forma "
+        "precisa e curta; depois redirecione gentilmente para o reagendamento da visita. "
+        "Máximo 4 linhas, estilo WhatsApp.",
         lead_id,
     )
     return {

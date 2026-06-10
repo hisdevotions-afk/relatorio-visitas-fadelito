@@ -160,6 +160,9 @@ python main.py --dry-run --processar
 # Demo com leads fictícios (não exige credenciais reais)
 python main.py --demo
 
+# Teste de regressão das conversas (dry-run, slots mockados, LLM real)
+python teste_conversa.py
+
 # Subir servidor de webhook
 uvicorn server:app --host 0.0.0.0 --port 8000
 ```

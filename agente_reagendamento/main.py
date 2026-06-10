@@ -237,10 +237,6 @@ def _tratar_resposta(lead: dict, mensagem: str, aba: str) -> None:
     logger.log_conversa(lead_id, nome, "CLIENTE→AGENTE", mensagem)
     logger.log_conversa(lead_id, nome, "AGENTE→CLIENTE", resultado["resposta"])
 
-    # Caminhos sem LLM (confirmado/recusado/ligar) não atualizam _conversas — registra manualmente
-    if resultado["status_agente"] in ("reagendado", "perdido"):
-        agente.registrar_mensagem_agente(lead_id, resultado["resposta"])
-
     updates = {
         "status_agente": resultado["status_agente"],
         "ultima_tentativa": agora_iso,

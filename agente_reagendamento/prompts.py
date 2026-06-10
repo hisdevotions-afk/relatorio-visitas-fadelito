@@ -49,15 +49,21 @@ PROMPT_CLASSIFICAR = """Você classifica respostas de clientes em um contexto de
 Opções apresentadas ao cliente:
 {opcoes}
 
+Última mensagem que o agente enviou ao cliente (use como contexto para interpretar a resposta):
+\"\"\"{contexto}\"\"\"
+
 Mensagem do cliente: "{mensagem}"
 
 Classifique em EXATAMENTE UMA categoria:
-- QUER_REAGENDAR: respondeu "1", quer reagendar ou expressou interesse em remarcar
-- RECUSOU: respondeu "2", optou por outra escola ou não quer reagendar
-- CONFIRMOU_DATA: escolheu horário específico dentre os oferecidos ou sugeriu data/horário concreto
-- QUER_NEGOCIAR: pediu horário diferente dos apresentados
+- QUER_REAGENDAR: respondeu "1" à mensagem inicial (opções 1/2), quer reagendar ou expressou interesse em remarcar
+- RECUSOU: respondeu "2" à mensagem inicial, optou por outra escola ou não quer reagendar
+- CONFIRMOU_DATA: escolheu um horário dentre os oferecidos (por número, posição como "o primeiro", ou texto) ou sugeriu data/horário concreto
+- QUER_NEGOCIAR: pediu horário/dia diferente dos apresentados
 - QUER_LIGAR: prefere contato telefônico
-- INDEFINIDO: resposta vaga ou sem relação com reagendamento
+- INDEFINIDO: pergunta sobre a escola (valores, estrutura, turmas, funcionamento, endereço etc.), resposta vaga ou fora das categorias acima
+
+ATENÇÃO: se a última mensagem do agente ofereceu uma lista de horários e o cliente respondeu
+com um número ou escolha, isso é CONFIRMOU_DATA (não QUER_REAGENDAR).
 
 Responda SOMENTE com a categoria na primeira linha.
 Se CONFIRMOU_DATA ou QUER_NEGOCIAR, na segunda linha escreva: DATA: <data e horário mencionado>"""
@@ -87,3 +93,4 @@ MSG_RECUSOU = (
 NOTIF_SDR_REAGENDADO = "✅ *Reagendado* | {nome} | {data_hora} | {unidade} | Tel: {telefone}"
 NOTIF_SDR_LIGAR = "📞 *Ligar agora* | {nome} quer falar por telefone | {unidade} | Tel: {telefone}"
 NOTIF_SDR_PERDIDO = "❌ *Sem retorno* | {nome} | 3 tentativas | Tel: {telefone}"
+NOTIF_SDR_RECUSOU = "❌ *Recusou* | {nome} | optou por não reagendar | Tel: {telefone}"
