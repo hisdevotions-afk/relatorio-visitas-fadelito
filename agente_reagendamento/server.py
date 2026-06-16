@@ -18,6 +18,7 @@ async def receive_webhook(request: Request):
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="JSON invalido")
+    logger.info(f"[WEBHOOK RAW] {payload}")
     try:
         main.processar_resposta_webhook(payload)
     except Exception as exc:
