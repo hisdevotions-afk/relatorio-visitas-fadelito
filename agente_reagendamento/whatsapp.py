@@ -151,10 +151,32 @@ def notify_sdr(mensagem: str) -> None:
 def parse_webhook(payload: dict) -> list[dict]:
     """Extrai mensagens do payload do webhook Gupshup.
 
-    Formato esperado:
-    {"type": "message", "payload": {"type": "text", "source": "55...",
-     "payload": {"text": "..."}, "id": "...", ...}, "timestamp": ...}
+    Suporta dois formatos:
+    - Meta WhatsApp Cloud API: {"entry": [{"changes": [{"value": {"messages": [...]}}]}]}
+    - Gupshup legado (simulação local): {"type": "message", "payload": {...}}
     """
+    # Formato Meta Cloud API (enviado pelo Gupshup WABA)
+    if "entry" in payload:
+        mensagens = []
+        for entry in payload.get("entry", []):
+            for change in entry.get("changes", []):
+                if change.get("field") != "messages":
+                    continue
+                for msg in change.get("value", {}).get("messages", []):
+                    if msg.get("type") != "text":
+                        continue
+                    text = msg.get("text", {}).get("body", "")
+                    if not text:
+                        continue
+                    mensagens.append({
+                        "from": msg.get("from", ""),
+                        "text": text,
+                        "timestamp": str(msg.get("timestamp", "")),
+                        "message_id": msg.get("id", ""),
+                    })
+        return mensagens
+
+    # Formato Gupshup legado (usado em _simular_webhook.py)
     if payload.get("type") != "message":
         return []
     inner = payload.get("payload", {})
