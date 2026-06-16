@@ -88,25 +88,30 @@ def ensure_agent_columns(aba: str | None = None) -> None:
         aba = tab_name()
 
     svc = _service()
+    get_ok = False
+    atual = []
     try:
         res = svc.spreadsheets().values().get(
             spreadsheetId=config.GOOGLE_SHEETS_ID,
             range=f"'{aba}'!H1:L1",
         ).execute()
         atual = (res.get("values") or [[]])[0]
+        get_ok = True
     except Exception:
-        atual = []
+        pass  # aba ainda não existe — não tenta gravar cabeçalho
 
-    if atual != CABECALHO_AGENTE:
-        if config.DRY_RUN:
-            logger.info(f"[DRY-RUN] Seria gravado cabeçalho agente em '{aba}'!H1:L1")
-            return
-        svc.spreadsheets().values().update(
-            spreadsheetId=config.GOOGLE_SHEETS_ID,
-            range=f"'{aba}'!H1:L1",
-            valueInputOption="RAW",
-            body={"values": [CABECALHO_AGENTE]},
-        ).execute()
+    if not get_ok or atual == CABECALHO_AGENTE:
+        return
+
+    if config.DRY_RUN:
+        logger.info(f"[DRY-RUN] Seria gravado cabeçalho agente em '{aba}'!H1:L1")
+        return
+    svc.spreadsheets().values().update(
+        spreadsheetId=config.GOOGLE_SHEETS_ID,
+        range=f"'{aba}'!H1:L1",
+        valueInputOption="RAW",
+        body={"values": [CABECALHO_AGENTE]},
+    ).execute()
 
 
 def get_leads(aba: str | None = None) -> list[dict]:
