@@ -22,7 +22,13 @@ async def receive_webhook(request: Request):
     try:
         main.processar_resposta_webhook(payload)
     except Exception as exc:
-        logger.erro(f"Erro ao processar webhook: {exc}")
+        import traceback
+        logger.erro(f"Erro ao processar webhook: {exc}\n{traceback.format_exc()}")
+        try:
+            import whatsapp as wa
+            wa.notify_sdr(f"⚠️ Erro no agente ao processar um webhook: {exc}")
+        except Exception:
+            pass
     return {"ok": True}
 
 

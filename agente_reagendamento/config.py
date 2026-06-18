@@ -32,7 +32,19 @@ WHATSAPP_TEMPLATE_NAME = os.getenv("WHATSAPP_TEMPLATE_NAME", "")
 WHATSAPP_TEMPLATE_ID = os.getenv("WHATSAPP_TEMPLATE_ID", "")
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
+# Dois provedores com failover automático bidirecional (ver llm.py):
+# o primário atende; se esgotar a cota, o backup assume — e vice-versa.
+LLM_PRIMARY = os.getenv("LLM_PRIMARY", "nvidia").lower()  # "nvidia" ou "groq"
+
+# NVIDIA NIM (OpenAI-compatible)
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
+
+# Groq (OpenAI-compatible)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # ── Agendamento ───────────────────────────────────────────────────────────────
 VISITA_DURACAO = int(os.getenv("VISITA_DURACAO_MINUTOS", "60"))

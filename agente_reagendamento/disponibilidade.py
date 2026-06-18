@@ -86,8 +86,12 @@ def _proximos_dias_uteis(n: int = 5) -> list[date]:
     return dias
 
 
-def _horarios_ocupados(dia: date) -> set[str]:
-    """Retorna conjunto de horários (HH:MM) já ocupados ou bloqueados no dia."""
+def _horarios_ocupados(dia: date, unidade: str = "") -> set[str]:
+    """Retorna conjunto de horários (HH:MM) já ocupados ou bloqueados no dia.
+
+    Se `unidade` for fornecida, considera apenas agendamentos dessa unidade
+    (campo `atendente` na API Gendo).
+    """
     iso = dia.isoformat()
     try:
         agendamentos = gendo.get_agendamentos(iso, iso)
@@ -95,8 +99,14 @@ def _horarios_ocupados(dia: date) -> set[str]:
         logger.aviso(f"Falha ao consultar disponibilidade para {iso}: {exc}")
         return set()
 
+    unidade_lower = unidade.lower() if unidade else ""
     ocupados: set[str] = set()
     for a in agendamentos:
+        if unidade_lower:
+            atendente = (a.get("atendente") or "").lower()
+            if unidade_lower not in atendente:
+                continue
+
         start = a.get("start", "")
         if not start:
             continue
@@ -114,8 +124,8 @@ def _horarios_ocupados(dia: date) -> set[str]:
     return ocupados
 
 
-def get_slots_disponiveis(n_opcoes: int = 3) -> list[dict]:
-    """Retorna até n_opcoes slots livres nos próximos 5 dias úteis.
+def get_slots_disponiveis(n_opcoes: int = 3, unidade: str = "") -> list[dict]:
+    """Retorna até n_opcoes slots livres nos próximos 5 dias úteis para a unidade indicada.
 
     Formato: [{"data": "2025-05-05", "horario": "09:00", "label": "segunda-feira, 05/05 às 09h"}]
     """
@@ -124,7 +134,7 @@ def get_slots_disponiveis(n_opcoes: int = 3) -> list[dict]:
     resultado = []
 
     for dia in dias:
-        ocupados = _horarios_ocupados(dia)
+        ocupados = _horarios_ocupados(dia, unidade)
         dia_semana = DIAS_PT[dia.weekday()]
 
         for horario in slots_do_dia:

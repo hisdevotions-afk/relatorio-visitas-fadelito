@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/opt/relatorio-visitas/agente_reagendamento
-EnvironmentFile=/opt/relatorio-visitas/.env
-ExecStart=uvicorn server:app --host 0.0.0.0 --port 8000
+EnvironmentFile=/opt/relatorio-visitas/agente_reagendamento/.env
+ExecStart=/opt/relatorio-visitas/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 

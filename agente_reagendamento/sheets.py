@@ -67,6 +67,12 @@ def hoje_e_dia_util() -> bool:
     return hoje.weekday() < 5 and not _is_feriado(hoje)
 
 
+def listar_abas() -> list[str]:
+    """Lista os títulos de todas as abas da planilha (via Google Sheets API)."""
+    meta = _service().spreadsheets().get(spreadsheetId=config.GOOGLE_SHEETS_ID).execute()
+    return [s["properties"]["title"] for s in meta.get("sheets", [])]
+
+
 def tab_name(d: date | None = None) -> str:
     """Retorna nome da aba no formato dd/mm/yyyy."""
     return (d or _ultimo_dia_util()).strftime("%d/%m/%Y")

@@ -16,7 +16,7 @@ SLOTS_MOCK = [
     {"data": "2026-06-11", "horario": "14:00", "label": "quinta-feira, 11/06 às 14h00"},
     {"data": "2026-06-12", "horario": "10:00", "label": "sexta-feira, 12/06 às 10h00"},
 ]
-disponibilidade.get_slots_disponiveis = lambda n=3: SLOTS_MOCK[:n]
+disponibilidade.get_slots_disponiveis = lambda n=3, unidade="": SLOTS_MOCK[:n]
 
 _contador = [0]
 

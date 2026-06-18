@@ -19,7 +19,11 @@ build/
 .eggs/
 venv/
 .venv/
+.venv_tallos/
 env/
+
+# Dados extraídos da Tallos (conversas reais — PII, não versionar)
+tallos_export/
 
 # IDEs
 .vscode/

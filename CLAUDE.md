@@ -52,7 +52,7 @@ Agente conversacional via WhatsApp que contata leads com status `Cancelado` ou `
 
 | Camada | Tecnologia |
 |---|---|
-| LLM | Groq / `llama-3.3-70b-versatile` (trocar para `ChatAnthropic` em produção) |
+| LLM | NVIDIA NIM (`nemotron-3-ultra-550b`) primário + Groq (`llama-3.3-70b`) backup, failover bidirecional automático (`llm.py`) |
 | WhatsApp template (tentativa 1) | Gupshup WABA — endpoint dedicado `/wa/api/v1/template/msg` (UUID do template) |
 | WhatsApp sessão (tentativas 2/3 e respostas) | Gupshup WABA — `/wa/api/v1/msg` |
 | Agendamento | API Gendo |
@@ -64,8 +64,9 @@ Agente conversacional via WhatsApp que contata leads com status `Cancelado` ou `
 | Arquivo | Responsabilidade |
 |---|---|
 | `main.py` | Orquestrador — proativo (`processar_leads`) e reativo (`processar_resposta_webhook`) |
-| `agente.py` | Cérebro: LLM via LangChain, histórico por lead, classificação de respostas |
-| `sheets.py` | Leitura e escrita no Google Sheets (colunas A–L) |
+| `agente.py` | Cérebro: classificação (determinística p/ "1"/"2"/horário; LLM p/ o resto), histórico por lead, fallback handoff |
+| `llm.py` | Camada de LLM com 2 provedores (NVIDIA NIM + Groq) e failover bidirecional automático + cooldown |
+| `sheets.py` | Leitura e escrita no Google Sheets (colunas A–L); `listar_abas()` p/ busca de lead |
 | `whatsapp.py` | Envio via Gupshup, parse do webhook, retry com backoff |
 | `server.py` | FastAPI — `POST /webhook` (Gupshup) e `GET /health` |
 | `disponibilidade.py` | Calcula slots livres nos próximos dias úteis via API Gendo |
@@ -127,7 +128,9 @@ WHATSAPP_SDR_NUMBER=5511989171391
 WHATSAPP_TEMPLATE_NAME=teste_agente_ia
 WHATSAPP_TEMPLATE_ID=f9b285ee-c2c4-4aee-9efb-72667d13d281
 
-# LLM
+# LLM (failover bidirecional: primário atende, backup assume se esgotar a cota)
+LLM_PRIMARY=nvidia
+NVIDIA_API_KEY=nvapi-...
 GROQ_API_KEY=gsk_...
 
 # Visitas
@@ -176,8 +179,8 @@ uvicorn server:app --host 0.0.0.0 --port 8000
 ### Deploy / Execução
 
 - **Fluxo proativo** (envio diário): GitHub Actions (`agente_reagendamento.yml`, cron 13h30 UTC) roda `main.py --processar`
-- **Fluxo reativo** (webhook): precisa de servidor público recebendo o callback do Gupshup em `POST /webhook` (porta 8000). Há `reagendamento.service` (systemd) e `setup_vps.sh` prontos, mas **não há servidor ativo confirmado** — enquanto não houver, respostas dos leads não são processadas automaticamente (workaround local: `_simular_webhook.py`)
-- **Não há CI/CD de deploy** — qualquer servidor precisa de `git pull` + `systemctl restart reagendamento` manual
+- **Fluxo reativo** (webhook): servidor **ativo** em `https://agente.fadelito.com.br` (VPS `76.13.236.111`, systemd `reagendamento`, porta 8000 atrás de Cloudflare). Gupshup faz callback em `POST /webhook`. Health: `GET /health` → `{"status":"ok"}`. Workaround local sem servidor: `_simular_webhook.py`
+- **Não há CI/CD de deploy** — após `git push`, atualizar a VPS com `git pull && systemctl restart reagendamento` (rodar `pip install -r requirements.txt` quando deps mudarem — ex.: `openai`)
 
 ### Gupshup — pontos importantes
 

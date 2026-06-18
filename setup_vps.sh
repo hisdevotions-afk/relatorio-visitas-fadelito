@@ -13,8 +13,11 @@ echo "Diretório: $REPO_DIR"
 
 # Dependências Python
 echo "[1/5] Instalando dependências Python..."
-pip install -r "$REPO_DIR/requirements.txt"
-pip install fastapi uvicorn
+apt install -y python3-venv python3-full 2>/dev/null || true
+python3 -m venv "$REPO_DIR/.venv"
+"$REPO_DIR/.venv/bin/pip" install --upgrade pip
+"$REPO_DIR/.venv/bin/pip" install -r "$REPO_DIR/requirements.txt"
+"$REPO_DIR/.venv/bin/pip" install fastapi uvicorn
 
 # Diretório de logs
 echo "[2/5] Criando diretório de logs..."
@@ -47,8 +50,8 @@ echo "  Status: $(systemctl is-active $SERVICE_NAME)"
 
 # Cron — envio diário às 10h30 BRT
 echo "[5/5] Configurando cron..."
-CRON_REL="0 13 * * 1-5 cd $REPO_DIR && python relatorio_visitas.py >> /var/log/relatorio_visitas.log 2>&1"
-CRON_AGT="30 13 * * 1-5 cd $REPO_DIR/agente_reagendamento && python main.py --processar >> /var/log/agente_reagendamento.log 2>&1"
+CRON_REL="0 13 * * 1-5 cd $REPO_DIR && $REPO_DIR/.venv/bin/python relatorio_visitas.py >> /var/log/relatorio_visitas.log 2>&1"
+CRON_AGT="30 13 * * 1-5 cd $REPO_DIR/agente_reagendamento && $REPO_DIR/.venv/bin/python main.py --processar >> /var/log/agente_reagendamento.log 2>&1"
 
 ( crontab -l 2>/dev/null | grep -v "relatorio_visitas\|agente_reagendamento"
   echo "$CRON_REL"
@@ -64,6 +67,5 @@ echo "Logs webhook:     journalctl -u $SERVICE_NAME -f"
 echo "Logs relatório:   tail -f /var/log/relatorio_visitas.log"
 echo "Logs agente:      tail -f /var/log/agente_reagendamento.log"
 echo ""
-echo "Configure no Z-API → Webhooks → Ao receber mensagem:"
-VPS_IP=$(curl -s ifconfig.me 2>/dev/null || echo "<IP_DO_VPS>")
-echo "  http://$VPS_IP:8000/webhook"
+echo "Configure no Gupshup → App → Callback URL:"
+echo "  http://76.13.236.111:8000/webhook"

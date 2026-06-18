@@ -198,32 +198,18 @@ def _encerrar_lead(lead: dict, agora: datetime) -> None:
 
 def _buscar_lead_em_abas(telefone: str, abas_recentes: int = 7) -> tuple[dict | None, str | None]:
     """Busca lead por telefone nas últimas N abas com data, retorna (lead, aba)."""
-    import gspread
-    from google.oauth2.service_account import Credentials
-    import config as _cfg
-
     try:
-        creds_json = __import__("os").getenv("GOOGLE_CREDENTIALS_JSON", "")
-        creds_file = __import__("os").getenv("GOOGLE_CREDENTIALS_FILE", "")
-        if creds_json:
-            creds = Credentials.from_service_account_info(
-                __import__("json").loads(creds_json), scopes=_cfg.GOOGLE_SCOPES)
-        else:
-            creds = Credentials.from_service_account_file(creds_file, scopes=_cfg.GOOGLE_SCOPES)
-        gc = gspread.authorize(creds)
-        spreadsheet = gc.open_by_key(_cfg.GOOGLE_SHEETS_ID)
-        todas = [ws.title for ws in spreadsheet.worksheets()]
+        todas = sh.listar_abas()
     except Exception as e:
         logger.erro(f"Erro ao listar abas: {e}")
         return None, None
 
     # filtra abas de data (dd/mm/yyyy) e ordena mais recentes primeiro
-    from datetime import datetime as _dt
     def _parse_aba(a: str):
         try:
-            return _dt.strptime(a, "%d/%m/%Y")
+            return datetime.strptime(a, "%d/%m/%Y")
         except ValueError:
-            return _dt.min
+            return datetime.min
     abas_data = sorted(
         [a for a in todas if len(a) == 10 and a[2] == "/" and a[5] == "/"],
         key=_parse_aba,
@@ -303,36 +289,62 @@ def _enviar_pos_handoff(lead: dict) -> None:
 
 
 def _tratar_resposta(lead: dict, mensagem: str, aba: str) -> None:
-    if lead["status_agente"] in STATUS_ENCERRADOS:
-        _enviar_pos_handoff(lead)
-        return
+    """Processa a resposta do lead com rede de segurança total.
 
+    Garante que o lead SEMPRE receba um retorno: se qualquer etapa (LLM, Gendo,
+    Sheets) falhar de forma inesperada, envia uma mensagem de fallback e aciona o
+    SDR. Nunca deixa a resposta do lead sem tratamento.
+    """
     lead_id = str(lead["id"])
     nome = lead["nome"]
+    try:
+        if lead["status_agente"] in STATUS_ENCERRADOS:
+            _enviar_pos_handoff(lead)
+            return
 
-    # Restaura histórico da sessão anterior e registra mensagem do cliente
-    agente.carregar_historico(lead_id, lead.get("log_conversa", ""))
-    agente.registrar_mensagem_cliente(lead_id, mensagem)
+        # Restaura histórico da sessão anterior e registra mensagem do cliente
+        agente.carregar_historico(lead_id, lead.get("log_conversa", ""))
+        agente.registrar_mensagem_cliente(lead_id, mensagem)
 
-    resultado = agente.processar_resposta_cliente(lead, mensagem)
-    agora_iso = datetime.now().isoformat()
+        resultado = agente.processar_resposta_cliente(lead, mensagem)
+        agora_iso = datetime.now().isoformat()
 
-    logger.log_conversa(lead_id, nome, "CLIENTE→AGENTE", mensagem)
-    logger.log_conversa(lead_id, nome, "AGENTE→CLIENTE", resultado["resposta"])
+        logger.log_conversa(lead_id, nome, "CLIENTE→AGENTE", mensagem)
+        logger.log_conversa(lead_id, nome, "AGENTE→CLIENTE", resultado["resposta"])
 
-    updates = {
-        "status_agente": resultado["status_agente"],
-        "ultima_tentativa": agora_iso,
-        "log_conversa": agente.serializar_historico(lead_id),
-    }
-    if resultado.get("nova_data"):
-        updates["nova_data"] = resultado["nova_data"]
+        # Persiste no Sheets (não-fatal: se falhar, ainda enviamos a resposta)
+        try:
+            updates = {
+                "status_agente": resultado["status_agente"],
+                "ultima_tentativa": agora_iso,
+                "log_conversa": agente.serializar_historico(lead_id),
+            }
+            if resultado.get("nova_data"):
+                updates["nova_data"] = resultado["nova_data"]
+            sh.update_lead_agente(aba, lead["row_index"], **updates)
+        except Exception as exc:
+            logger.erro(f"Falha ao gravar no Sheets (lead {lead_id}): {exc}")
 
-    sh.update_lead_agente(aba, lead["row_index"], **updates)
-    wa.send_message(lead["telefone"], resultado["resposta"])
+        wa.send_message(lead["telefone"], resultado["resposta"])
 
-    if resultado.get("notif_sdr"):
-        wa.notify_sdr(resultado["notif_sdr"])
+        if resultado.get("notif_sdr"):
+            wa.notify_sdr(resultado["notif_sdr"])
+
+    except Exception as exc:
+        # Rede de segurança final: o lead não pode ficar sem resposta
+        import traceback
+        logger.erro(f"ERRO inesperado ao tratar resposta do lead {lead_id}: {exc}\n{traceback.format_exc()}")
+        try:
+            wa.send_message(lead["telefone"], prompts.MSG_FALLBACK)
+        except Exception as exc2:
+            logger.erro(f"Falha até no envio de fallback (lead {lead_id}): {exc2}")
+        try:
+            wa.notify_sdr(prompts.NOTIF_SDR_FALLBACK.format(
+                nome=nome, motivo=f"erro: {exc}", telefone=lead.get("telefone", ""),
+                mensagem=mensagem[:80],
+            ))
+        except Exception:
+            pass
 
 
 # ── Demo com leads fictícios ──────────────────────────────────────────────────
