@@ -14,7 +14,7 @@ MENSAGEM_TENTATIVA_1 = (
 # ── Horários enviados após lead responder "1" ─────────────────────────────────
 
 MSG_ENVIAR_SLOTS = (
-    "Ótimo! Temos os seguintes horários disponíveis:\n"
+    "Ótimo! Temos os seguintes horários disponíveis na unidade Fadelito {unidade}:\n"
     "- {opcao_1}\n"
     "- {opcao_2}\n"
     "- {opcao_3}\n\n"
@@ -74,6 +74,7 @@ Se CONFIRMOU_DATA ou QUER_NEGOCIAR, na segunda linha escreva: DATA: <data e hor�
 
 MSG_CONFIRMADO = (
     "Perfeito! Visita confirmada para {data_hora} na unidade Fadelito {unidade}. 💙\n\n"
+    "📍 {endereco}\n\n"
     "Quais os nomes das pessoas que virão à visita? (para liberar na portaria)\n"
     "E me informe um e-mail, por favor.\n\n"
     "A diretora irá recebê-los. Por segurança, pedimos que apresentem um documento com foto na portaria.\n\n"

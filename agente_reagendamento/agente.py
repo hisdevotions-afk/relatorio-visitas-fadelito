@@ -279,6 +279,7 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         while len(opcoes_labels) < 3:
             opcoes_labels.append("(sem disponibilidade)")
         resposta = prompts.MSG_ENVIAR_SLOTS.format(
+            unidade=unidade,
             opcao_1=opcoes_labels[0],
             opcao_2=opcoes_labels[1],
             opcao_3=opcoes_labels[2],
@@ -301,6 +302,7 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             while len(opcoes_labels) < 3:
                 opcoes_labels.append("(sem disponibilidade)")
             resposta = prompts.MSG_ENVIAR_SLOTS.format(
+                unidade=unidade,
                 opcao_1=opcoes_labels[0], opcao_2=opcoes_labels[1], opcao_3=opcoes_labels[2],
             )
             registrar_mensagem_agente(lead_id, resposta)
@@ -332,10 +334,13 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
                 f"[DRY-RUN] Seria criado agendamento no Gendo: {slot['data']} {slot['horario']}"
             )
 
-        resposta = prompts.MSG_CONFIRMADO.format(data_hora=nova_data, unidade=unidade)
+        endereco = rag.get_endereco(unidade) or "Endereço disponível na unidade"
         maps_link = rag.get_maps_link(unidade)
         if maps_link:
-            resposta += f"\n\n📍 Como chegar: {maps_link}"
+            endereco += f"\n{maps_link}"
+        resposta = prompts.MSG_CONFIRMADO.format(
+            data_hora=nova_data, unidade=unidade, endereco=endereco
+        )
 
         registrar_mensagem_agente(lead_id, resposta)
         return {

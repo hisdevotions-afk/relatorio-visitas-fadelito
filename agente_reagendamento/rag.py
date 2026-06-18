@@ -54,16 +54,44 @@ FINANCEIRO (contexto apenas — NÃO negociar)
 - Novas unidades (São Caetano, Higienópolis): condições especiais de lançamento — mencionar APENAS se o lead perguntar
 - Qualquer negociação: presencialmente com a diretora
 
-UNIDADES
-- Zona Central SP: Aclimação, Jardins, Klabin, Paraíso, Higienópolis
-- Zona Leste SP: Anália Franco, Mooca, Tatuapé
-- Zona Oeste SP: Bonfiglioli, Lapa, Perdizes, Pinheiros, Vila Leopoldina, Vila Madalena, Vila Sônia
-- Zona Sul SP: Alto da Boa Vista, Brooklin, Campo Belo, Indianápolis, Ipiranga, Marajoara, Moema, Panamby, Portal, Real Parque, Saúde, Vila Gumercindo, Vila Mariana
-- ABC SP: Santo André, São Caetano
-- Grande SP: Granja Viana, Guarulhos, Osasco
-- Interior SP: Campinas, Piracicaba
+UNIDADES E ENDEREÇOS (use SEMPRE estes endereços — nunca invente)
+- Aclimação: R. Loureiro da Cruz, 332
+- Anália Franco: R. Vilela, 872
+- Boa Vista: Rua Conde de Itu, 464
+- Bonfiglioli: Praça Isai Leirner, 164
+- Brooklin: Av. Professor Vicente Rao, 1208
+- Campinas: Av. Júlio de Mesquita, 594
+- Campo Belo: Rua Gil Eanes, 553
+- Guarulhos: R. Josephina Mandotti, 47
+- Granja Viana: R. Direita, 110 - Vila Santo Antônio
+- Higienópolis: R. Rosa e Silva, 270
+- Indianópolis: Av. Indianópolis, 977
+- Ipiranga: Rua Padre Marchetti, 378
+- Jardins: Alameda Casa Branca, 583
+- Klabin: R. Rodrigo Vieira, 315
+- Lapa: R. Espártaco, 215
+- Marajoara: Av. Washington Luís, 814
+- Moema: R. Inhambu, 891
+- Mooca: R. Teresina, 464
+- Osasco: Av. Santo Antônio, 1750
+- Panamby: R. José Ramon Urtiza, 835
+- Paraíso: R. Afonso de Freitas, 687
+- Perdizes: R. João Ramalho, 1063
+- Pinheiros: R. Francisco Leitão, 497
+- Piracicaba: Av. Torquato da Silva Leitão, 208
+- Portal do Morumbi: Rua Dr. Luiz Migliano, 425
+- Real Parque: Av. Morumbi, 6560
+- Santo André: R. das Monções, 345
+- São Caetano: R. Rafael Corrêa Sampaio, 99
+- Saúde: R. Gal. Chagas Santos, 301
+- Tatuapé: R. Ivaí, 187
+- Vila Gumercindo: Rua Assungui, 432
+- Vila Leopoldina: R. Aroaba, 155
+- Vila Madalena: R. das Tabocas, 170
+- Vila Mariana: R. Morgado de Mateus, 287
+- Vila Sônia: R. Cenobelino Serra, 71
 
-LINKS GOOGLE MAPS (enviar SOMENTE ao confirmar visita ou quando lead pedir localização)
+LINKS GOOGLE MAPS (enviar junto do endereço ao confirmar visita ou quando lead pedir localização)
 - Vila Leopoldina: https://maps.app.goo.gl/SWQb5PrjWYe176Dn8
 - Moema: https://maps.app.goo.gl/gLQDD9YbHnttF93V7
 - Pinheiros: https://maps.app.goo.gl/qxrXWfqD6YpQVHpN6
@@ -151,6 +179,44 @@ _MAPS_LINKS: dict[str, str] = {
     "campinas": "https://maps.app.goo.gl/FKGtoGzsVtMaufoGA",
 }
 
+_ENDERECOS: dict[str, str] = {
+    "aclimação": "R. Loureiro da Cruz, 332",
+    "anália franco": "R. Vilela, 872",
+    "boa vista": "Rua Conde de Itu, 464",
+    "bonfiglioli": "Praça Isai Leirner, 164",
+    "brooklin": "Av. Professor Vicente Rao, 1208",
+    "campinas": "Av. Júlio de Mesquita, 594",
+    "campo belo": "Rua Gil Eanes, 553",
+    "guarulhos": "R. Josephina Mandotti, 47",
+    "granja": "R. Direita, 110 - Vila Santo Antônio",
+    "higienópolis": "R. Rosa e Silva, 270",
+    "indianópolis": "Av. Indianópolis, 977",
+    "ipiranga": "Rua Padre Marchetti, 378",
+    "jardins": "Alameda Casa Branca, 583",
+    "klabin": "R. Rodrigo Vieira, 315",
+    "lapa": "R. Espártaco, 215",
+    "marajoara": "Av. Washington Luís, 814",
+    "moema": "R. Inhambu, 891",
+    "mooca": "R. Teresina, 464",
+    "osasco": "Av. Santo Antônio, 1750",
+    "panamby": "R. José Ramon Urtiza, 835",
+    "paraíso": "R. Afonso de Freitas, 687",
+    "perdizes": "R. João Ramalho, 1063",
+    "pinheiros": "R. Francisco Leitão, 497",
+    "piracicaba": "Av. Torquato da Silva Leitão, 208",
+    "portal": "Rua Dr. Luiz Migliano, 425",
+    "real parque": "Av. Morumbi, 6560",
+    "santo andré": "R. das Monções, 345",
+    "são caetano": "R. Rafael Corrêa Sampaio, 99",
+    "saúde": "R. Gal. Chagas Santos, 301",
+    "tatuapé": "R. Ivaí, 187",
+    "vila gumercindo": "Rua Assungui, 432",
+    "vila leopoldina": "R. Aroaba, 155",
+    "vila madalena": "R. das Tabocas, 170",
+    "vila mariana": "R. Morgado de Mateus, 287",
+    "vila sônia": "R. Cenobelino Serra, 71",
+}
+
 
 _RAG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "tallos_export", "roberto_rag.jsonl")
@@ -220,4 +286,13 @@ def get_maps_link(unidade: str) -> str | None:
     for nome, link in _MAPS_LINKS.items():
         if nome in chave:
             return link
+    return None
+
+
+def get_endereco(unidade: str) -> str | None:
+    """Retorna endereço completo da unidade, se disponível."""
+    chave = unidade.lower()
+    for nome, end in _ENDERECOS.items():
+        if nome in chave or chave in nome:
+            return end
     return None
