@@ -16,6 +16,12 @@ import whatsapp as wa
 # Visitas elegíveis para reagendamento
 STATUS_VISIITA_ALVO = {"Faltou", "Cancelado"}
 
+# Status que encerram a conversa com o agente
+STATUS_ENCERRADOS = {"reagendado", "transferido_sdr", "perdido"}
+
+# Leads que já receberam a mensagem automática pós-handoff nesta sessão do servidor
+_leads_respondidos_pos_handoff: set[str] = set()
+
 # Dias de espera entre tentativas
 DIAS_TENTATIVA_2 = 2
 DIAS_TENTATIVA_3 = 5
@@ -42,13 +48,14 @@ def processar_leads(aba: str | None = None, teste_simples: bool = False) -> None
         tel_teste = _normalizar_tel(config.WHATSAPP_TESTE_NUMBER)
         for lead in leads:
             tel_lead = _normalizar_tel(lead.get("telefone", ""))
-            if tel_lead == tel_teste and tel_teste != "":
+            eh_teste = (tel_lead == tel_teste and tel_teste != "") or str(lead.get("id")) == "99999"
+            if eh_teste:
                 leads_teste.append(lead)
             else:
                 logger.info(f"[MODO TESTE] Pulando lead real: {lead.get('nome', 'Sem nome')} ({lead.get('telefone', 'Sem telefone')})")
         leads = leads_teste
         if not leads:
-            logger.info(f"[MODO TESTE] Nenhum lead de teste encontrado. Cadastre uma linha na planilha com o telefone {config.WHATSAPP_TESTE_NUMBER}.")
+            logger.info(f"[MODO TESTE] Nenhum lead de teste encontrado. Cadastre uma linha na planilha com telefone {config.WHATSAPP_TESTE_NUMBER} ou ID 99999.")
 
     agora = datetime.now()
     processados = 0
@@ -74,7 +81,7 @@ def _processar_lead(lead: dict, agora: datetime, teste_simples: bool = False) ->
     if status_visita not in STATUS_VISIITA_ALVO:
         return False
 
-    if status_agente in ("reagendado", "perdido"):
+    if status_agente in STATUS_ENCERRADOS:
         return False
 
     if not telefone:
@@ -101,7 +108,7 @@ def _processar_lead(lead: dict, agora: datetime, teste_simples: bool = False) ->
     if not deve_enviar:
         return False
 
-    slots = disponibilidade.get_slots_disponiveis(3)
+    slots = disponibilidade.get_slots_disponiveis(3, lead.get("unidade", ""))
     if not slots:
         logger.aviso(f"Nenhum slot disponível para lead {lead_id}")
         return False
@@ -189,19 +196,75 @@ def _encerrar_lead(lead: dict, agora: datetime) -> None:
 
 # ── Processamento de resposta recebida (webhook) ──────────────────────────────
 
+def _buscar_lead_em_abas(telefone: str, abas_recentes: int = 7) -> tuple[dict | None, str | None]:
+    """Busca lead por telefone nas últimas N abas com data, retorna (lead, aba)."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    import config as _cfg
+
+    try:
+        creds_json = __import__("os").getenv("GOOGLE_CREDENTIALS_JSON", "")
+        creds_file = __import__("os").getenv("GOOGLE_CREDENTIALS_FILE", "")
+        if creds_json:
+            creds = Credentials.from_service_account_info(
+                __import__("json").loads(creds_json), scopes=_cfg.GOOGLE_SCOPES)
+        else:
+            creds = Credentials.from_service_account_file(creds_file, scopes=_cfg.GOOGLE_SCOPES)
+        gc = gspread.authorize(creds)
+        spreadsheet = gc.open_by_key(_cfg.GOOGLE_SHEETS_ID)
+        todas = [ws.title for ws in spreadsheet.worksheets()]
+    except Exception as e:
+        logger.erro(f"Erro ao listar abas: {e}")
+        return None, None
+
+    # filtra abas de data (dd/mm/yyyy) e ordena mais recentes primeiro
+    from datetime import datetime as _dt
+    def _parse_aba(a: str):
+        try:
+            return _dt.strptime(a, "%d/%m/%Y")
+        except ValueError:
+            return _dt.min
+    abas_data = sorted(
+        [a for a in todas if len(a) == 10 and a[2] == "/" and a[5] == "/"],
+        key=_parse_aba,
+        reverse=True
+    )[:abas_recentes]
+
+    for aba in abas_data:
+        try:
+            leads = sh.get_leads(aba)
+            lead = _buscar_lead_por_telefone(leads, telefone)
+            if lead:
+                return lead, aba
+        except Exception:
+            continue
+    return None, None
+
+
 def processar_resposta_webhook(payload: dict) -> None:
     """Ponto de entrada para mensagens recebidas via webhook Meta."""
     mensagens = wa.parse_webhook(payload)
-    aba = sh.tab_name()
-    leads = sh.get_leads(aba)
+    aba_padrao = sh.tab_name()
+    leads_padrao = sh.get_leads(aba_padrao)
 
     for msg in mensagens:
         telefone_de = msg["from"]
         texto = msg["text"]
-        lead = _buscar_lead_por_telefone(leads, telefone_de)
+
+        # tenta primeiro na aba do último dia útil
+        lead = _buscar_lead_por_telefone(leads_padrao, telefone_de)
+        aba = aba_padrao
+
+        # se não achar, varre as últimas 7 abas com data
+        if not lead:
+            lead, aba = _buscar_lead_em_abas(telefone_de)
+
         if not lead:
             logger.info(f"Mensagem de número desconhecido: {telefone_de}")
             continue
+
+        if aba != aba_padrao:
+            logger.info(f"Lead {telefone_de} encontrado na aba '{aba}' (não na '{aba_padrao}')")
         _tratar_resposta(lead, texto, aba)
 
 
@@ -220,8 +283,28 @@ def _normalizar_tel(tel: str) -> str:
     return digits
 
 
+def _enviar_pos_handoff(lead: dict) -> None:
+    """Responde uma única vez quando o lead envia mensagem após o encerramento."""
+    lead_id = str(lead["id"])
+    if lead_id in _leads_respondidos_pos_handoff:
+        return
+
+    status = lead["status_agente"]
+    if status == "reagendado":
+        msg = prompts.MSG_POS_REAGENDADO
+    elif status == "transferido_sdr":
+        msg = prompts.MSG_POS_TRANSFERIDO_SDR
+    else:  # perdido
+        msg = prompts.MSG_POS_PERDIDO
+
+    _leads_respondidos_pos_handoff.add(lead_id)
+    wa.send_message(lead["telefone"], msg)
+    logger.log_conversa(lead_id, lead["nome"], "AGENTE→CLIENTE", msg)
+
+
 def _tratar_resposta(lead: dict, mensagem: str, aba: str) -> None:
-    if lead["status_agente"] in ("reagendado", "perdido"):
+    if lead["status_agente"] in STATUS_ENCERRADOS:
+        _enviar_pos_handoff(lead)
         return
 
     lead_id = str(lead["id"])
