@@ -173,14 +173,24 @@ uvicorn server:app --host 0.0.0.0 --port 8000
 ### Lead de teste
 
 - **Nome:** Roberto (TESTE) | **ID:** 99999 | **Tel:** 11989171391
-- Precisa existir como linha na aba que será processada (ex.: aba `09/06/2026`)
+- Precisa existir como linha na aba que será processada
 - Com `MODO_TESTE=true`, todos os leads reais são ignorados e só ele é processado
+- Na VPS, rodar proativo: `cd /opt/relatorio-visitas/agente_reagendamento && ../.venv/bin/python main.py --processar --tab 18/06/2026`
 
 ### Deploy / Execução
 
 - **Fluxo proativo** (envio diário): GitHub Actions (`agente_reagendamento.yml`, cron 13h30 UTC) roda `main.py --processar`
 - **Fluxo reativo** (webhook): servidor **ativo** em `https://agente.fadelito.com.br` (VPS `76.13.236.111`, systemd `reagendamento`, porta 8000 atrás de Cloudflare). Gupshup faz callback em `POST /webhook`. Health: `GET /health` → `{"status":"ok"}`. Workaround local sem servidor: `_simular_webhook.py`
-- **Não há CI/CD de deploy** — após `git push`, atualizar a VPS com `git pull && systemctl restart reagendamento` (rodar `pip install -r requirements.txt` quando deps mudarem — ex.: `openai`)
+- **Não há CI/CD de deploy** — após `git push`, atualizar a VPS:
+  ```bash
+  cd /opt/relatorio-visitas
+  git stash          # se houver alterações locais (reagendamento.service, setup_vps.sh)
+  git pull
+  /opt/relatorio-visitas/.venv/bin/pip install <pacote>   # quando deps mudarem
+  systemctl restart reagendamento
+  ```
+  ⚠️ Usar sempre `/opt/relatorio-visitas/.venv/bin/pip` — o pip do sistema retorna "externally-managed-environment". Deps novas adicionadas: `openai` (LLM failover).
+- **Porta real na VPS:** `8002` (apesar de o `.service` ter `--port 8000` — o Nginx/Cloudflare roteia para 8002). Verificar com `journalctl -u reagendamento | grep "Uvicorn running"`.
 
 ### Gupshup — pontos importantes
 
