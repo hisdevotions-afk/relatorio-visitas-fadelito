@@ -210,19 +210,26 @@ def _buscar_lead_em_abas(telefone: str, abas_recentes: int = 7) -> tuple[dict | 
             return datetime.strptime(a, "%d/%m/%Y")
         except ValueError:
             return datetime.min
+
     abas_data = sorted(
         [a for a in todas if len(a) == 10 and a[2] == "/" and a[5] == "/"],
         key=_parse_aba,
         reverse=True
     )[:abas_recentes]
 
+    tel_norm = _normalizar_tel(telefone)
+    logger.info(f"[BUSCA] tel={tel_norm} | abas={abas_data}")
+
     for aba in abas_data:
         try:
             leads = sh.get_leads(aba)
+            tels = [_normalizar_tel(l.get("telefone","")) for l in leads]
+            logger.info(f"[BUSCA] aba={aba} leads={len(leads)} tels={tels[:5]}")
             lead = _buscar_lead_por_telefone(leads, telefone)
             if lead:
                 return lead, aba
-        except Exception:
+        except Exception as exc:
+            logger.aviso(f"[BUSCA] erro em aba {aba}: {exc}")
             continue
     return None, None
 
