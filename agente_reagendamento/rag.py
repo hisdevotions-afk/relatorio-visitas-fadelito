@@ -2,6 +2,7 @@
 import json
 import os
 import random
+import unicodedata
 from functools import lru_cache
 
 KNOWLEDGE_BASE = """\
@@ -280,19 +281,61 @@ def get_exemplos_roberto(unidade: str = "", seed: int | None = None) -> str:
     )
 
 
+def _norm_unidade(s: str) -> str:
+    """Normaliza nome de unidade p/ busca: sem acento, abreviação 'V.'→'Vila'."""
+    base = _sem_acento(s).replace("v.", "vila")
+    return " ".join(base.split())
+
+
 def get_maps_link(unidade: str) -> str | None:
     """Retorna link Google Maps para a unidade, se disponível."""
-    chave = unidade.lower()
+    chave = _norm_unidade(unidade)
     for nome, link in _MAPS_LINKS.items():
-        if nome in chave:
+        if _norm_unidade(nome) in chave:
             return link
     return None
 
 
 def get_endereco(unidade: str) -> str | None:
     """Retorna endereço completo da unidade, se disponível."""
-    chave = unidade.lower()
+    chave = _norm_unidade(unidade)
     for nome, end in _ENDERECOS.items():
-        if nome in chave or chave in nome:
+        n = _norm_unidade(nome)
+        if n in chave or chave in n:
             return end
+    return None
+
+
+# Nomes canônicos das unidades, usados para reconhecer trocas de unidade
+# pedidas pelo lead e para consultar a agenda correta na Gendo.
+UNIDADES: list[str] = [
+    "Aclimação", "Anália Franco", "Boa Vista", "Bonfiglioli", "Brooklin",
+    "Campinas", "Campo Belo", "Guarulhos", "Granja Viana", "Higienópolis",
+    "Indianópolis", "Ipiranga", "Jardins", "Klabin", "Lapa", "Marajoara",
+    "Moema", "Mooca", "Osasco", "Panamby", "Paraíso", "Perdizes", "Pinheiros",
+    "Piracicaba", "Portal do Morumbi", "Real Parque", "Santo André",
+    "São Caetano", "Saúde", "Tatuapé", "Vila Gumercindo", "Vila Leopoldina",
+    "Vila Madalena", "Vila Mariana", "Vila Sônia",
+]
+
+
+def _sem_acento(s: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s or "")
+        if unicodedata.category(c) != "Mn"
+    ).lower()
+
+
+def resolver_unidade(texto: str) -> str | None:
+    """Identifica o nome canônico de uma unidade citada no texto do lead.
+
+    Casa de forma acento/maiúscula-insensível, do nome mais longo para o mais
+    curto (evita "Vila" casar antes de "Vila Madalena"). Retorna None se nada casar.
+    """
+    alvo = _sem_acento(texto)
+    if not alvo:
+        return None
+    for nome in sorted(UNIDADES, key=len, reverse=True):
+        if _sem_acento(nome) in alvo:
+            return nome
     return None

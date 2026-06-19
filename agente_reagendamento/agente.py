@@ -14,6 +14,7 @@ import gendo
 import logger
 import prompts
 import rag
+import unidades
 
 # Histórico em memória por ID do agendamento (chave: str)
 _conversas: dict[str, list] = {}
@@ -254,7 +255,10 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
     """
     lead_id = str(lead["id"])
     nome = lead["nome"]
-    unidade = lead["unidade"]
+    # Unidade efetiva: se o lead já pediu outra unidade numa rodada anterior
+    # (persistida na coluna M), todo o fluxo passa a usá-la — slots, endereço,
+    # confirmação e Gendo seguem a unidade escolhida, nunca a original.
+    unidade = lead.get("unidade_alvo") or lead["unidade"]
     telefone = lead["telefone"]
     try:
         slots = disponibilidade.get_slots_disponiveis(3, unidade)
@@ -318,15 +322,27 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         if slot and not config.DRY_RUN:
             try:
                 dados = gendo.get_agendamento_dados(lead_id)
+                id_responsavel = dados.get("id_responsavel") or dados.get("responsavel_id")
+                # Troca de unidade: a agenda é definida pelo id_responsavel.
+                # Sem sobrescrever, o agendamento cairia na unidade original.
+                if lead.get("unidade_alvo"):
+                    resp_alvo = unidades.id_responsavel(unidade)
+                    if resp_alvo is not None:
+                        id_responsavel = resp_alvo
+                    else:
+                        logger.aviso(
+                            f"Não encontrei id_responsavel da unidade '{unidade}' na Gendo "
+                            f"(lead {lead_id}); usando o responsável original."
+                        )
                 novo = gendo.criar_agendamento(
                     id_paciente=dados.get("id_paciente") or dados.get("paciente_id"),
-                    id_responsavel=dados.get("id_responsavel") or dados.get("responsavel_id"),
+                    id_responsavel=id_responsavel,
                     id_servico=dados.get("id_servico") or dados.get("servico_id"),
                     data=slot["data"],
                     horario=slot["horario"],
                 )
                 gendo.atualizar_status(lead_id, "7")  # 7 = Cancelado (substituído)
-                logger.info(f"Novo agendamento criado: ID {novo.get('id')}")
+                logger.info(f"Novo agendamento criado: ID {novo.get('id')} | unidade '{unidade}'")
             except Exception as exc:
                 logger.aviso(f"Falha ao criar agendamento no Gendo: {exc}")
         elif slot and config.DRY_RUN:
@@ -350,6 +366,90 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             "notif_sdr": prompts.NOTIF_SDR_REAGENDADO.format(
                 nome=nome, data_hora=nova_data, unidade=unidade, telefone=telefone
             ),
+        }
+
+    if "QUER_OUTRA_UNIDADE" in categoria:
+        canonica = rag.resolver_unidade(mensagem_cliente)
+
+        # Lead pediu outra unidade mas não disse qual → pergunta qual
+        if not canonica:
+            registrar_mensagem_agente(lead_id, prompts.MSG_QUAL_UNIDADE)
+            return {
+                "resposta": prompts.MSG_QUAL_UNIDADE,
+                "status_agente": lead["status_agente"],
+                "nova_data": "",
+                "notif_sdr": None,
+            }
+
+        # Resolve a unidade na Gendo (nome real da agenda + id_responsavel).
+        # Guardamos o nome como o Gendo o conhece para que o filtro de
+        # disponibilidade case exatamente e a criação caia na agenda certa.
+        nova_unidade, _resp = unidades.resolver(canonica)
+        if not nova_unidade:
+            registrar_mensagem_agente(lead_id, prompts.MSG_OUTRA_UNIDADE_SEM_SLOTS.format(unidade=canonica))
+            return {
+                "resposta": prompts.MSG_OUTRA_UNIDADE_SEM_SLOTS.format(unidade=canonica),
+                "status_agente": "transferido_sdr",
+                "nova_data": "",
+                "notif_sdr": prompts.NOTIF_SDR_LIGAR.format(
+                    nome=nome, unidade=canonica, telefone=telefone
+                ),
+            }
+
+        # Mesma unidade já agendada → trata como pedido normal de reagendamento
+        if nova_unidade.lower() == unidade.lower():
+            opcoes_labels = [s["label"] for s in slots]
+            while len(opcoes_labels) < 3:
+                opcoes_labels.append("(sem disponibilidade)")
+            resposta = prompts.MSG_ENVIAR_SLOTS.format(
+                unidade=unidade,
+                opcao_1=opcoes_labels[0], opcao_2=opcoes_labels[1], opcao_3=opcoes_labels[2],
+            )
+            registrar_mensagem_agente(lead_id, resposta)
+            return {
+                "resposta": resposta,
+                "status_agente": lead["status_agente"],
+                "nova_data": "",
+                "notif_sdr": None,
+            }
+
+        # Consulta a disponibilidade REAL da nova unidade na Gendo
+        try:
+            slots_nova = disponibilidade.get_slots_disponiveis(3, nova_unidade)
+        except Exception as exc:
+            logger.aviso(f"Falha ao buscar slots da unidade {nova_unidade} (lead {lead_id}): {exc}")
+            slots_nova = []
+
+        if not slots_nova:
+            resposta = prompts.MSG_OUTRA_UNIDADE_SEM_SLOTS.format(unidade=nova_unidade)
+            registrar_mensagem_agente(lead_id, resposta)
+            return {
+                "resposta": resposta,
+                "status_agente": "transferido_sdr",
+                "nova_data": "",
+                "unidade_alvo": nova_unidade,
+                "notif_sdr": prompts.NOTIF_SDR_LIGAR.format(
+                    nome=nome, unidade=nova_unidade, telefone=telefone
+                ),
+            }
+
+        opcoes_labels = [s["label"] for s in slots_nova]
+        while len(opcoes_labels) < 3:
+            opcoes_labels.append("(sem disponibilidade)")
+        endereco = rag.get_endereco(nova_unidade) or "Endereço disponível na unidade"
+        resposta = prompts.MSG_ENVIAR_SLOTS_OUTRA_UNIDADE.format(
+            unidade=nova_unidade,
+            endereco=endereco,
+            opcao_1=opcoes_labels[0], opcao_2=opcoes_labels[1], opcao_3=opcoes_labels[2],
+        )
+        registrar_mensagem_agente(lead_id, resposta)
+        logger.info(f"Lead {lead_id}: troca de unidade '{unidade}' → '{nova_unidade}'")
+        return {
+            "resposta": resposta,
+            "status_agente": lead["status_agente"],
+            "nova_data": "",
+            "unidade_alvo": nova_unidade,  # persiste p/ as próximas rodadas (coluna M)
+            "notif_sdr": None,
         }
 
     if "QUER_LIGAR" in categoria:
@@ -396,6 +496,9 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             "Responda à última mensagem do cliente usando APENAS a base de conhecimento "
             "e os dados do lead informados no system prompt (nunca invente valores, vagas ou horários). "
             "Se for pergunta sobre a unidade ou visita, use os dados do lead. "
+            "NUNCA liste horários específicos nem afirme disponibilidade de datas — quem oferece "
+            "horários é o sistema, não você. Se o cliente quiser marcar, apenas convide-o a reagendar "
+            "(ex.: 'posso te enviar os horários disponíveis?'). "
             "Responda de forma precisa e curta; depois redirecione para o reagendamento. "
             "Máximo 4 linhas, estilo WhatsApp.",
             lead_id,

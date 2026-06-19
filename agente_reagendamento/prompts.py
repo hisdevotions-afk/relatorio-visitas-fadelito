@@ -21,6 +21,30 @@ MSG_ENVIAR_SLOTS = (
     "Qual desses funciona melhor para vocês?"
 )
 
+# ── Troca de unidade ──────────────────────────────────────────────────────────
+
+# Pergunta qual unidade quando o lead pede outra mas não especifica qual
+MSG_QUAL_UNIDADE = (
+    "Claro, podemos verificar em outra unidade! 😊\n"
+    "Qual unidade você prefere?"
+)
+
+# Slots reais (consultados na Gendo) da nova unidade escolhida pelo lead
+MSG_ENVIAR_SLOTS_OUTRA_UNIDADE = (
+    "Perfeito! A unidade Fadelito {unidade} fica em {endereco}.\n\n"
+    "Temos estes horários disponíveis lá:\n"
+    "- {opcao_1}\n"
+    "- {opcao_2}\n"
+    "- {opcao_3}\n\n"
+    "Qual desses funciona melhor para vocês?"
+)
+
+# Quando a unidade pedida não tem horários livres nos próximos dias úteis
+MSG_OUTRA_UNIDADE_SEM_SLOTS = (
+    "No momento não encontrei horários livres na unidade Fadelito {unidade} para os próximos dias. "
+    "Vou avisar nossa equipe para te ajudar a encontrar uma data por aqui mesmo. 😊"
+)
+
 # ── Mensagem simplificada para teste de entrega ───────────────────────────────
 
 PRIMEIRA_MENSAGEM_TESTE = "Olá [PRIMEIRO_NOME]! Teste do agente de reagendamento. Visita [UNIDADE]."
@@ -57,10 +81,11 @@ Opções apresentadas ao cliente:
 Mensagem do cliente: "{mensagem}"
 
 Classifique em EXATAMENTE UMA categoria:
-- QUER_REAGENDAR: respondeu "1" à mensagem inicial (opções 1/2), quer reagendar ou expressou interesse em remarcar
+- QUER_REAGENDAR: respondeu "1" à mensagem inicial (opções 1/2), quer reagendar ou expressou interesse em remarcar na MESMA unidade
 - RECUSOU: respondeu "2" à mensagem inicial, optou por outra escola ou não quer reagendar
 - CONFIRMOU_DATA: escolheu um horário dentre os oferecidos (por número, posição como "o primeiro", ou texto) ou sugeriu data/horário concreto
-- QUER_NEGOCIAR: pediu horário/dia diferente dos apresentados
+- QUER_NEGOCIAR: pediu horário/dia diferente dos apresentados (mesma unidade)
+- QUER_OUTRA_UNIDADE: pergunta se pode agendar em outra unidade/bairro, ou indica preferência por uma unidade diferente da agendada
 - QUER_LIGAR: prefere atendimento pessoal, pede para falar com alguém da equipe ou solicita ligação
 - INDEFINIDO: pergunta sobre a escola (valores, estrutura, turmas, funcionamento, endereço etc.), resposta vaga ou fora das categorias acima
 

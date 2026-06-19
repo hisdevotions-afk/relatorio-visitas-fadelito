@@ -1,6 +1,9 @@
 """Orquestrador principal do agente de reagendamento de visitas."""
 import argparse
 import sys
+import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timedelta
 
 # config deve ser importado ANTES dos demais módulos do projeto
@@ -234,9 +237,51 @@ def _buscar_lead_em_abas(telefone: str, abas_recentes: int = 7) -> tuple[dict | 
     return None, None
 
 
-def processar_resposta_webhook(payload: dict) -> None:
-    """Ponto de entrada para mensagens recebidas via webhook Meta."""
-    mensagens = wa.parse_webhook(payload)
+# Deduplicação de mensagens recebidas (o Gupshup reentrega a mesma mensagem
+# quando o webhook demora a responder 200). Guarda os últimos IDs já tratados.
+_MAX_IDS_MEMORIA = 1000
+_ids_vistos: "OrderedDict[str, float]" = OrderedDict()
+_lock_ids = threading.Lock()
+
+
+def _ja_processado(message_id: str) -> bool:
+    """Marca a mensagem como vista; retorna True se já tinha sido vista (duplicata).
+
+    Sem message_id não há como deduplicar — processa (retorna False).
+    """
+    if not message_id:
+        return False
+    with _lock_ids:
+        if message_id in _ids_vistos:
+            return True
+        _ids_vistos[message_id] = time.time()
+        while len(_ids_vistos) > _MAX_IDS_MEMORIA:
+            _ids_vistos.popitem(last=False)
+        return False
+
+
+def filtrar_mensagens_novas(payload: dict) -> list[dict]:
+    """Parseia o webhook e descarta mensagens já processadas (rápido e síncrono).
+
+    Roda no caminho da requisição HTTP, antes de devolver 200 ao Gupshup, para
+    que reentregas sejam barradas mesmo enquanto a anterior ainda processa.
+    """
+    novas = []
+    for msg in wa.parse_webhook(payload):
+        if _ja_processado(msg.get("message_id", "")):
+            logger.info(f"[DEDUP] Mensagem repetida ignorada: id={msg.get('message_id')}")
+            continue
+        novas.append(msg)
+    return novas
+
+
+def processar_mensagens(mensagens: list[dict]) -> None:
+    """Processa as mensagens já deduplicadas (parte lenta: Gendo + LLM + Sheets).
+
+    Pensado para rodar em background, fora do caminho da resposta HTTP.
+    """
+    if not mensagens:
+        return
     aba_padrao = sh.tab_name()
     leads_padrao = sh.get_leads(aba_padrao)
 
@@ -259,6 +304,15 @@ def processar_resposta_webhook(payload: dict) -> None:
         if aba != aba_padrao:
             logger.info(f"Lead {telefone_de} encontrado na aba '{aba}' (não na '{aba_padrao}')")
         _tratar_resposta(lead, texto, aba)
+
+
+def processar_resposta_webhook(payload: dict) -> None:
+    """Processamento síncrono completo (simulação local/testes).
+
+    Em produção o servidor usa filtrar_mensagens_novas + processar_mensagens
+    (em background) para responder 200 ao Gupshup imediatamente.
+    """
+    processar_mensagens(filtrar_mensagens_novas(payload))
 
 
 def _buscar_lead_por_telefone(leads: list[dict], telefone: str) -> dict | None:
@@ -328,6 +382,8 @@ def _tratar_resposta(lead: dict, mensagem: str, aba: str) -> None:
             }
             if resultado.get("nova_data"):
                 updates["nova_data"] = resultado["nova_data"]
+            if resultado.get("unidade_alvo"):
+                updates["unidade_alvo"] = resultado["unidade_alvo"]
             sh.update_lead_agente(aba, lead["row_index"], **updates)
         except Exception as exc:
             logger.erro(f"Falha ao gravar no Sheets (lead {lead_id}): {exc}")

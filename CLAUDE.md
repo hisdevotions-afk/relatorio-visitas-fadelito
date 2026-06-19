@@ -56,7 +56,7 @@ Agente conversacional via WhatsApp que contata leads com status `Cancelado` ou `
 | WhatsApp template (tentativa 1) | Gupshup WABA — endpoint dedicado `/wa/api/v1/template/msg` (UUID do template) |
 | WhatsApp sessão (tentativas 2/3 e respostas) | Gupshup WABA — `/wa/api/v1/msg` |
 | Agendamento | API Gendo |
-| Persistência | Google Sheets (colunas A–L) |
+| Persistência | Google Sheets (colunas A–M) |
 | Webhook server | FastAPI + Uvicorn |
 
 ### Módulos
@@ -66,10 +66,11 @@ Agente conversacional via WhatsApp que contata leads com status `Cancelado` ou `
 | `main.py` | Orquestrador — proativo (`processar_leads`) e reativo (`processar_resposta_webhook`) |
 | `agente.py` | Cérebro: classificação (determinística p/ "1"/"2"/horário; LLM p/ o resto), histórico por lead, fallback handoff |
 | `llm.py` | Camada de LLM com 2 provedores (NVIDIA NIM + Groq) e failover bidirecional automático + cooldown |
-| `sheets.py` | Leitura e escrita no Google Sheets (colunas A–L); `listar_abas()` p/ busca de lead |
+| `sheets.py` | Leitura e escrita no Google Sheets (colunas A–M); `listar_abas()` p/ busca de lead |
 | `whatsapp.py` | Envio via Gupshup, parse do webhook, retry com backoff |
-| `server.py` | FastAPI — `POST /webhook` (Gupshup) e `GET /health` |
+| `server.py` | FastAPI — `POST /webhook` (Gupshup) e `GET /health`. Deduplica por `message_id` e responde 200 na hora, processando em background (Gendo+LLM+Sheets) para o Gupshup não reentregar a mesma mensagem |
 | `disponibilidade.py` | Calcula slots livres nos próximos dias úteis via API Gendo |
+| `unidades.py` | Registro de unidades a partir da Gendo (`atendente`→`id_responsavel`, cache 1h); resolve nome p/ a agenda correta na troca de unidade |
 | `gendo.py` | Cliente da API Gendo (get, criar, atualizar status) |
 | `rag.py` | Base de conhecimento Fadelito (RAG v2.0) + links Google Maps por unidade |
 | `prompts.py` | Templates de mensagem e prompts do LLM |
@@ -92,20 +93,25 @@ Lead responde "1" (quer reagendar) → agente envia os 3 slots disponíveis
 Lead escolhe horário               → cria agendamento no Gendo, cancela o antigo (status 7)
 Lead responde "2" / recusa         → marca como "perdido", notifica SDR
 Lead quer ligar                    → notifica SDR para ligar
+Lead pede OUTRA unidade            → pergunta qual; ao informar, consulta slots reais daquela unidade na Gendo, envia endereço + horários e grava unidade_alvo (coluna M)
 Lead negocia horário               → LLM oferece alternativas
-Resposta indefinida                → LLM responde mantendo foco no reagendamento
+Resposta indefinida                → LLM responde mantendo foco no reagendamento (proibido listar/inventar horários)
 ```
 
-### Colunas do Sheets (A–L)
+### Colunas do Sheets (A–M)
 
 ```
 A=ID  B=Data/Hora  C=Nome  D=Unidade  E=Serviço  F=Status  G=Telefone
-H=status_agente  I=tentativas  J=ultima_tentativa  K=nova_data  L=log_conversa
+H=status_agente  I=tentativas  J=ultima_tentativa  K=nova_data  L=log_conversa  M=unidade_alvo
 ```
 
 A coluna **L** (`log_conversa`) armazena o histórico de cada conversa serializado em JSON — permite reconstituir o contexto entre sessões.
 
-**status_agente possíveis:** `pendente | tentativa_1 | tentativa_2 | tentativa_3 | reagendado | perdido`
+A coluna **M** (`unidade_alvo`) guarda a unidade escolhida quando o lead pede para visitar **outra** unidade. Enquanto preenchida, todo o fluxo (slots reais consultados na Gendo, endereço, confirmação e criação do agendamento) passa a usar essa unidade no lugar da original (coluna D). `ensure_agent_columns` migra abas antigas automaticamente.
+
+**Modelo de unidade na Gendo:** cada unidade é um "responsável" — `atendente` (no `/agendamentos`) / `nome_responsavel` (no `/agendamento-dados`) = nome da unidade; `resp`/`id_responsavel` = id da agenda (ex.: Osasco=21, Aclimação=40, V. Madalena=51). **É o `id_responsavel` que define em qual unidade o agendamento cai ao criar.** `unidades.py` descobre esse mapeamento dinamicamente e a criação na troca de unidade passa o `id_responsavel` da unidade-alvo (senão cairia na agenda original). Os nomes no Gendo podem divergir do display ("V. Madalena", "Analia Franco", "Alto da Boa Vista") — a resolução normaliza acento e a abreviação "V."→"Vila".
+
+**status_agente possíveis:** `pendente | tentativa_1 | tentativa_2 | tentativa_3 | reagendado | perdido | transferido_sdr`
 
 ### Configuração (`.env` em `agente_reagendamento/`)
 

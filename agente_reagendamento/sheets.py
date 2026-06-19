@@ -1,4 +1,4 @@
-"""Leitura e escrita no Google Sheets (colunas A–L)."""
+"""Leitura e escrita no Google Sheets (colunas A–M)."""
 import json
 import sys
 from datetime import date, datetime, timedelta
@@ -9,13 +9,14 @@ from googleapiclient.discovery import build
 import config
 import logger
 
-# Colunas de controle do agente (H–L, índice 0-based = 7–11)
+# Colunas de controle do agente (H–M, índice 0-based = 7–12)
 CABECALHO_AGENTE = [
     "status_agente",    # H
     "tentativas",       # I
     "ultima_tentativa", # J
     "nova_data",        # K
     "log_conversa",     # L
+    "unidade_alvo",     # M
 ]
 
 
@@ -89,7 +90,7 @@ def _col_letra(idx_zero: int) -> str:
 
 
 def ensure_agent_columns(aba: str | None = None) -> None:
-    """Garante que as colunas H–L existam com cabeçalho correto."""
+    """Garante que as colunas H–M existam com cabeçalho correto."""
     if aba is None:
         aba = tab_name()
 
@@ -99,7 +100,7 @@ def ensure_agent_columns(aba: str | None = None) -> None:
     try:
         res = svc.spreadsheets().values().get(
             spreadsheetId=config.GOOGLE_SHEETS_ID,
-            range=f"'{aba}'!H1:L1",
+            range=f"'{aba}'!H1:M1",
         ).execute()
         atual = (res.get("values") or [[]])[0]
         get_ok = True
@@ -110,11 +111,11 @@ def ensure_agent_columns(aba: str | None = None) -> None:
         return
 
     if config.DRY_RUN:
-        logger.info(f"[DRY-RUN] Seria gravado cabeçalho agente em '{aba}'!H1:L1")
+        logger.info(f"[DRY-RUN] Seria gravado cabeçalho agente em '{aba}'!H1:M1")
         return
     svc.spreadsheets().values().update(
         spreadsheetId=config.GOOGLE_SHEETS_ID,
-        range=f"'{aba}'!H1:L1",
+        range=f"'{aba}'!H1:M1",
         valueInputOption="RAW",
         body={"values": [CABECALHO_AGENTE]},
     ).execute()
@@ -129,7 +130,7 @@ def get_leads(aba: str | None = None) -> list[dict]:
     try:
         res = svc.spreadsheets().values().get(
             spreadsheetId=config.GOOGLE_SHEETS_ID,
-            range=f"'{aba}'!A:L",
+            range=f"'{aba}'!A:M",
         ).execute()
     except Exception as exc:
         logger.erro(f"Falha ao ler aba '{aba}': {exc}")
@@ -141,7 +142,7 @@ def get_leads(aba: str | None = None) -> list[dict]:
 
     leads = []
     for i, linha in enumerate(values[1:], start=2):  # linha 1 é cabeçalho
-        while len(linha) < 12:
+        while len(linha) < 13:
             linha.append("")
         leads.append({
             "row_index": i,
@@ -158,18 +159,20 @@ def get_leads(aba: str | None = None) -> list[dict]:
             "ultima_tentativa": linha[9],
             "nova_data":        linha[10],
             "log_conversa":     linha[11],
+            "unidade_alvo":     linha[12],
         })
     return leads
 
 
 def update_lead_agente(aba: str, row_index: int, **kwargs) -> None:
-    """Atualiza colunas de controle do agente (H–K) para a linha indicada."""
+    """Atualiza colunas de controle do agente (H–M) para a linha indicada."""
     col_map = {
         "status_agente":    7,
         "tentativas":       8,
         "ultima_tentativa": 9,
         "nova_data":        10,
         "log_conversa":     11,
+        "unidade_alvo":     12,
     }
 
     data = []

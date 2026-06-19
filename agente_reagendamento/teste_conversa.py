@@ -104,5 +104,13 @@ l = novo_lead()
 turno(l, "Oi, agradeço o contato mas acabamos fechando com outra escola perto de casa")
 
 print("\n" + "=" * 70)
+print("CENÁRIO 8 — Troca de unidade (slots reais da nova unidade + confirma lá)")
+l = novo_lead()
+turno(l, "Consigo agendar visita em outra unidade?")   # sem dizer qual → pergunta
+turno(l, "Tenho interesse na Aclimação")               # define unidade_alvo
+l["unidade_alvo"] = "Aclimação"  # simula persistência da coluna M entre rodadas
+turno(l, "pode ser o primeiro horário")                # confirma NA Aclimação
+
+print("\n" + "=" * 70)
 print("HISTÓRICO SERIALIZADO DO CENÁRIO 1 (verifica coluna L limpa):")
 print(agente.serializar_historico("T1"))
