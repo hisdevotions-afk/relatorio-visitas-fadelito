@@ -7,14 +7,21 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, BackgroundTasks
 
+import config
 import disponibilidade
 import logger
 import main
 import sheets as _sheets
 
 app = FastAPI()
+
+
+def _checar_api_key(x_api_key: str = Header(default="")) -> None:
+    """Rejeita requisições sem a chave correta quando INTERNAL_API_KEY está definida."""
+    if config.INTERNAL_API_KEY and x_api_key != config.INTERNAL_API_KEY:
+        raise HTTPException(status_code=401, detail="API key inválida ou ausente")
 
 
 def _processar_em_background(mensagens: list[dict]) -> None:
@@ -63,6 +70,7 @@ async def health():
 async def get_disponibilidade(
     unidade: str = Query(default=""),
     n_opcoes: int = Query(default=3),
+    _: None = Depends(_checar_api_key),
 ):
     """Slots livres via lógica Python testada — chamado pelo workflow n8n."""
     try:
@@ -85,6 +93,7 @@ async def get_disponibilidade(
 async def buscar_lead(
     telefone: str = Query(...),
     n_abas: int = Query(default=7),
+    _: None = Depends(_checar_api_key),
 ):
     """Busca lead pelo telefone nas últimas n_abas abas — multi-tab, chamado pelo n8n."""
     def _norm(t: str) -> str:

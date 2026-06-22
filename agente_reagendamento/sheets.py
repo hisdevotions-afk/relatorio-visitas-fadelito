@@ -7,6 +7,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
 import config
+import feriados as _feriados
 import logger
 
 # Colunas de controle do agente (H–M, índice 0-based = 7–12)
@@ -36,28 +37,11 @@ def _service():
     return build("sheets", "v4", credentials=_get_creds())
 
 
-_FERIADOS_FIXOS: frozenset[tuple[int, int]] = frozenset({
-    (1, 1), (21, 4), (1, 5), (7, 9),
-    (12, 10), (2, 11), (15, 11), (20, 11), (25, 12),
-})
-
-# Feriados móveis por ano: {ano: {(dia, mes), ...}}
-_FERIADOS_MOVEIS: dict[int, frozenset[tuple[int, int]]] = {
-    2026: frozenset({(16, 2), (17, 2), (3, 4), (4, 6)}),
-}
-
-
-def _is_feriado(d: date) -> bool:
-    if (d.day, d.month) in _FERIADOS_FIXOS:
-        return True
-    return (d.day, d.month) in _FERIADOS_MOVEIS.get(d.year, frozenset())
-
-
 def _ultimo_dia_util() -> date:
     if config.DATA_OVERRIDE:
         return datetime.strptime(config.DATA_OVERRIDE, "%d/%m/%Y").date()
     d = date.today() - timedelta(days=1)
-    while d.weekday() >= 5 or _is_feriado(d):
+    while d.weekday() >= 5 or _feriados.is_feriado(d):
         d -= timedelta(days=1)
     return d
 
@@ -65,7 +49,7 @@ def _ultimo_dia_util() -> date:
 def hoje_e_dia_util() -> bool:
     """Retorna True se hoje for dia útil (não fim de semana, não feriado)."""
     hoje = date.today()
-    return hoje.weekday() < 5 and not _is_feriado(hoje)
+    return hoje.weekday() < 5 and not _feriados.is_feriado(hoje)
 
 
 def listar_abas() -> list[str]:

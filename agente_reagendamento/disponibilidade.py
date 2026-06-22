@@ -1,9 +1,9 @@
 """Calcula slots livres nos próximos dias úteis via API Gendo."""
 import unicodedata
 from datetime import date, datetime, timedelta
-from functools import lru_cache
 
 import config
+import feriados
 import gendo
 import logger
 
@@ -21,55 +21,6 @@ def _norm_unidade(s: str) -> str:
     ).lower()
     base = base.replace("fadelito", "").replace("v.", "vila").strip()
     return " ".join(base.split())
-
-# Feriados fixos nacionais: (dia, mês)
-_FERIADOS_FIXOS = {
-    (1, 1),   # Confraternização Universal
-    (21, 4),  # Tiradentes
-    (1, 5),   # Dia do Trabalhador
-    (7, 9),   # Independência do Brasil
-    (12, 10), # Nossa Senhora Aparecida
-    (2, 11),  # Finados
-    (15, 11), # Proclamação da República
-    (25, 12), # Natal
-}
-
-
-def _pascoa(ano: int) -> date:
-    """Calcula a data da Páscoa pelo algoritmo de Butcher."""
-    a = ano % 19
-    b = ano // 100
-    c = ano % 100
-    d = b // 4
-    e = b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i = c // 4
-    k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    mes = (h + l - 7 * m + 114) // 31
-    dia = ((h + l - 7 * m + 114) % 31) + 1
-    return date(ano, mes, dia)
-
-
-@lru_cache(maxsize=8)
-def _feriados_do_ano(ano: int) -> frozenset[date]:
-    """Retorna conjunto de feriados nacionais (fixos + móveis) para o ano."""
-    fixos = {date(ano, mes, dia) for dia, mes in _FERIADOS_FIXOS}
-    pascoa = _pascoa(ano)
-    moveis = {
-        pascoa - timedelta(days=48),  # Carnaval — segunda-feira
-        pascoa - timedelta(days=47),  # Carnaval — terça-feira
-        pascoa - timedelta(days=2),   # Sexta-Feira da Paixão
-        pascoa + timedelta(days=60),  # Corpus Christi
-    }
-    return frozenset(fixos | moveis)
-
-
-def _e_feriado(d: date) -> bool:
-    return d in _feriados_do_ano(d.year)
 
 
 def _gerar_slots_do_dia() -> list[str]:
@@ -91,7 +42,7 @@ def _proximos_dias_uteis(n: int = 5) -> list[date]:
     dias = []
     d = date.today() + timedelta(days=1)
     while len(dias) < n:
-        if d.weekday() < 5 and not _e_feriado(d):  # segunda–sexta, sem feriados
+        if d.weekday() < 5 and not feriados.is_feriado(d):  # segunda–sexta, sem feriados
             dias.append(d)
         d += timedelta(days=1)
     return dias

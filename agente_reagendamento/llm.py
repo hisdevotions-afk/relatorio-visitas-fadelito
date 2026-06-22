@@ -12,6 +12,7 @@ Exposto:
     LLMIndisponivel: levantada quando TODOS os provedores falham.
 """
 import time
+from datetime import date
 
 from openai import OpenAI
 
@@ -20,6 +21,10 @@ import logger
 
 COOLDOWN_SEGUNDOS = 1800  # 30 min: tempo que um provedor esgotado fica de fora
 TENTATIVAS_POR_PROVEDOR = 2
+_ALERTA_THRESHOLD = 3  # failovers no dia antes de notificar o SDR
+
+# {nome_provedor: (data, contagem_do_dia)}
+_failover_contador: dict[str, tuple[date, int]] = {}
 
 
 class LLMIndisponivel(Exception):
@@ -72,6 +77,23 @@ def _get_provedores() -> list[_Provedor]:
     return _provedores
 
 
+def _registrar_failover(nome: str) -> None:
+    """Conta failovers por provedor por dia; alerta SDR ao atingir o threshold."""
+    hoje = date.today()
+    d, cnt = _failover_contador.get(nome, (hoje, 0))
+    cnt = (cnt + 1) if d == hoje else 1
+    _failover_contador[nome] = (hoje, cnt)
+    if cnt == _ALERTA_THRESHOLD:
+        try:
+            import whatsapp as _wa  # lazy — evita ciclo de importação
+            _wa.notify_sdr(
+                f"⚠️ LLM failover: '{nome}' entrou em cooldown {cnt}× hoje. "
+                f"Agente usando provedor backup. Verifique cota/status do provedor."
+            )
+        except Exception as e:
+            logger.aviso(f"Falha ao notificar SDR sobre failover '{nome}': {e}")
+
+
 def _eh_cota_ou_rate_limit(exc: Exception) -> bool:
     txt = str(exc).lower()
     status = getattr(exc, "status_code", None)
@@ -103,6 +125,7 @@ def invoke(messages, max_tokens: int = 1024, temperature: float = 0.6) -> str:
                     ultimo_erro = exc
                     if _eh_cota_ou_rate_limit(exc):
                         prov.cooldown_ate = time.time() + COOLDOWN_SEGUNDOS
+                        _registrar_failover(prov.nome)
                         logger.aviso(f"LLM '{prov.nome}' esgotado/rate-limit — backup assume "
                                      f"(cooldown {COOLDOWN_SEGUNDOS // 60}min): {str(exc)[:120]}")
                         break  # não insiste no mesmo provedor; vai para o próximo

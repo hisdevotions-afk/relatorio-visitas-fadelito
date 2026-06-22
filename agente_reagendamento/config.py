@@ -57,3 +57,8 @@ WHATSAPP_TESTE_NUMBER = os.getenv("WHATSAPP_TESTE_NUMBER", "")
 
 # ── OVERRIDE DE DATA (dd/mm/yyyy) — força aba específica, útil para testes ───
 DATA_OVERRIDE = os.getenv("DATA_OVERRIDE", "")
+
+# ── Segurança — endpoints internos (/disponibilidade, /buscar-lead) ───────────
+# Quando definida, server.py exige o header X-API-KEY nessas rotas.
+# Deixe vazio para desativar a proteção (p.ex., durante transição).
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
