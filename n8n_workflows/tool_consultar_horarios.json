@@ -1,0 +1,72 @@
+{
+  "id": "fadelitoToolHorarios",
+  "name": "Fadelito · Tool · Consultar Horários",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "unidade",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "quando-o-agente-pede-horários",
+      "name": "Quando o Agente Pede Horários",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "calcularSlotsPythonTool",
+      "name": "Calcular Slots",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://agente.fadelito.com.br/disponibilidade",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "unidade",
+              "value": "={{ $json.unidade }}"
+            },
+            {
+              "name": "n_opcoes",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Quando o Agente Pede Horários": {
+      "main": [
+        [
+          {
+            "node": "Calcular Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

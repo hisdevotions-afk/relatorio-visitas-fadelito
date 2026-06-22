@@ -1,4 +1,5 @@
 """Calcula slots livres nos próximos dias úteis via API Gendo."""
+import unicodedata
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 
@@ -10,6 +11,16 @@ DIAS_PT = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sex
 
 # Status que indicam horário ocupado na API
 STATUS_OCUPADOS = {"1", "2", "6"}
+
+
+def _norm_unidade(s: str) -> str:
+    """Normaliza nome de unidade para comparação fuzzy (sem acento, sem 'Fadelito', V.→Vila)."""
+    base = "".join(
+        c for c in unicodedata.normalize("NFD", s or "")
+        if unicodedata.category(c) != "Mn"
+    ).lower()
+    base = base.replace("fadelito", "").replace("v.", "vila").strip()
+    return " ".join(base.split())
 
 # Feriados fixos nacionais: (dia, mês)
 _FERIADOS_FIXOS = {
@@ -90,7 +101,9 @@ def _horarios_ocupados(dia: date, unidade: str = "") -> set[str]:
     """Retorna conjunto de horários (HH:MM) já ocupados ou bloqueados no dia.
 
     Se `unidade` for fornecida, considera apenas agendamentos dessa unidade
-    (campo `atendente` na API Gendo).
+    (campo `atendente` na API Gendo). O match é bidirecional e normalizado
+    (sem acento, sem prefixo 'Fadelito', 'V.'→'Vila') para lidar com divergências
+    entre o nome no Sheets e o retornado pela API.
     """
     iso = dia.isoformat()
     try:
@@ -99,12 +112,15 @@ def _horarios_ocupados(dia: date, unidade: str = "") -> set[str]:
         logger.aviso(f"Falha ao consultar disponibilidade para {iso}: {exc}")
         return set()
 
-    unidade_lower = unidade.lower() if unidade else ""
+    unidade_norm = _norm_unidade(unidade) if unidade else ""
     ocupados: set[str] = set()
     for a in agendamentos:
-        if unidade_lower:
-            atendente = (a.get("atendente") or "").lower()
-            if unidade_lower not in atendente:
+        if unidade_norm:
+            atendente_norm = _norm_unidade(a.get("atendente") or "")
+            if not atendente_norm:
+                continue
+            # Bidirecional: "osasco" bate tanto em "osasco" quanto em "fadelito osasco"
+            if unidade_norm not in atendente_norm and atendente_norm not in unidade_norm:
                 continue
 
         start = a.get("start", "")
@@ -121,6 +137,7 @@ def _horarios_ocupados(dia: date, unidade: str = "") -> set[str]:
         if status in STATUS_OCUPADOS or servico is None:
             ocupados.add(hora)
 
+    logger.info(f"Disponibilidade {iso} [{unidade_norm or 'todas'}]: {len(agendamentos)} agendamentos, {len(ocupados)} ocupados: {sorted(ocupados)}")
     return ocupados
 
 

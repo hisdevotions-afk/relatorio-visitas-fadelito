@@ -1,0 +1,231 @@
+{
+  "id": "fadelitoToolConfirmar",
+  "name": "Fadelito · Tool · Confirmar Agendamento",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "lead_id",
+              "type": "string"
+            },
+            {
+              "name": "data",
+              "type": "string"
+            },
+            {
+              "name": "horario",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "quando-executado-pelo-agente",
+      "name": "Quando Executado pelo Agente",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://mora877.adm.gendo.app/api/agendamento-dados/{{ $json.lead_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "dados-do-agendamento",
+      "name": "Dados do Agendamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fadelitoGendo",
+          "name": "Fadelito Gendo (Bearer)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://mora877.adm.gendo.app/api/agendamento",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id_paciente",
+              "value": "={{ $json.data?.id_paciente ?? $json.data?.paciente_id ?? $json.id_paciente ?? $json.paciente_id }}"
+            },
+            {
+              "name": "id_responsavel",
+              "value": "={{ $json.data?.id_responsavel ?? $json.data?.responsavel_id ?? $json.id_responsavel ?? $json.responsavel_id }}"
+            },
+            {
+              "name": "id_servico",
+              "value": "={{ $json.data?.id_servico ?? $json.data?.servico_id ?? $json.id_servico ?? $json.servico_id }}"
+            },
+            {
+              "name": "data",
+              "value": "={{ $('Quando Executado pelo Agente').item.json.data }}"
+            },
+            {
+              "name": "horario",
+              "value": "={{ $('Quando Executado pelo Agente').item.json.horario }}"
+            },
+            {
+              "name": "tempo",
+              "value": "60"
+            },
+            {
+              "name": "status",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "criar-agendamento",
+      "name": "Criar Agendamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fadelitoGendo",
+          "name": "Fadelito Gendo (Bearer)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://mora877.adm.gendo.app/api/agendamento-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $('Quando Executado pelo Agente').item.json.lead_id }}"
+            },
+            {
+              "name": "status",
+              "value": "7"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cancelar-antigo",
+      "name": "Cancelar Antigo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fadelitoGendo",
+          "name": "Fadelito Gendo (Bearer)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "sucesso",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "r2",
+              "name": "mensagem",
+              "value": "={{ 'Agendamento confirmado no Gendo para ' + $('Quando Executado pelo Agente').item.json.data + ' às ' + $('Quando Executado pelo Agente').item.json.horario }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "resultado",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Quando Executado pelo Agente": {
+      "main": [
+        [
+          {
+            "node": "Dados do Agendamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados do Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Criar Agendamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Cancelar Antigo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelar Antigo": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

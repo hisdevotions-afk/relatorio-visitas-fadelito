@@ -152,13 +152,20 @@ def _classificar_resposta(mensagem: str, slots: list[dict], lead_id: str) -> tup
 def _escolha_de_slot(mensagem: str, slots: list[dict], lead_id: str) -> dict | None:
     """Detecta escolha de slot por número simples (ex.: "1", "2", "3").
 
-    Só vale quando a última mensagem do agente foi a lista de horários —
-    fora desse contexto, "1"/"2" são as opções reagendar/recusar do template.
+    Só vale quando a última mensagem do agente apresentou horários — seja pela
+    lista padrão ("horários disponíveis") ou pela resposta a uma negociação
+    (que inclui os labels dos slots literalmente). Fora desse contexto, "1"/"2"
+    são as opções reagendar/recusar do template.
     """
     m = re.fullmatch(r"\s*(\d)\s*[.!]?\s*", mensagem or "")
     if not m or not slots:
         return None
-    if "horários disponíveis" not in _ultima_mensagem_agente(lead_id):
+    ultima = _ultima_mensagem_agente(lead_id)
+    agente_ofereceu_horarios = (
+        "horários disponíveis" in ultima
+        or any(s["label"] in ultima for s in slots)
+    )
+    if not agente_ofereceu_horarios:
         return None
     idx = int(m.group(1)) - 1
     return slots[idx] if 0 <= idx < len(slots) else None
@@ -174,12 +181,12 @@ def _encontrar_slot(data_info: str, slots: list[dict]) -> dict | None:
     if not data_info:
         return None
 
+    # Tenta dd/mm/yyyy HH:MM (formato completo)
     match = re.search(r"(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})", data_info)
     if match:
         try:
             data_iso = datetime.strptime(match.group(1), "%d/%m/%Y").strftime("%Y-%m-%d")
             horario = match.group(2)
-            # só vale se o horário casar com algum slot realmente disponível
             for slot in slots:
                 if slot["data"] == data_iso and slot["horario"] == horario:
                     return slot
@@ -187,6 +194,20 @@ def _encontrar_slot(data_info: str, slots: list[dict]) -> dict | None:
         except ValueError:
             pass
 
+    # Tenta dd/mm HH:MM (sem ano — assume ano corrente)
+    match = re.search(r"(\d{2}/\d{2})\s+(\d{2}:\d{2})", data_info)
+    if match:
+        try:
+            ano = datetime.now().year
+            data_iso = datetime.strptime(f"{match.group(1)}/{ano}", "%d/%m/%Y").strftime("%Y-%m-%d")
+            horario = match.group(2)
+            for slot in slots:
+                if slot["data"] == data_iso and slot["horario"] == horario:
+                    return slot
+        except ValueError:
+            pass
+
+    # Fallback: busca por horário (HH:MM) ou data ISO presente em data_info
     for slot in slots:
         if slot["horario"] in data_info or slot["data"] in data_info:
             return slot
@@ -476,8 +497,10 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         try:
             msg_neg = _invocar_llm_instrucao(
                 system_prompt,
-                f"O lead quer {preferencia}. Ofereça estas alternativas de forma empática "
-                f"(máximo 3 linhas):\n{opcoes_alt}",
+                f"O lead quer {preferencia}. Responda de forma empática e inclua "
+                f"LITERALMENTE estas opções de horário disponíveis na mensagem "
+                f"(copie os itens abaixo sem alterar o texto):\n{opcoes_alt}\n"
+                f"Máximo 4 linhas. Termine com uma pergunta curta sobre qual horário prefere.",
                 lead_id,
             )
         except LLMIndisponivel:
@@ -490,6 +513,27 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         }
 
     # INDEFINIDO — perguntas ou respostas vagas: responde com a base de conhecimento
+    hist_atual = _historico(lead_id)
+    rodadas = sum(1 for m in hist_atual if isinstance(m, AIMessage))
+    if rodadas >= 3 and slots:
+        # Conversa já tem 3+ rodadas sem chegar a uma categoria — oferece os slots diretamente
+        opcoes_labels = [s["label"] for s in slots]
+        while len(opcoes_labels) < 3:
+            opcoes_labels.append("(sem disponibilidade)")
+        resposta = prompts.MSG_ENVIAR_SLOTS.format(
+            unidade=unidade,
+            opcao_1=opcoes_labels[0],
+            opcao_2=opcoes_labels[1],
+            opcao_3=opcoes_labels[2],
+        )
+        registrar_mensagem_agente(lead_id, resposta)
+        return {
+            "resposta": resposta,
+            "status_agente": lead["status_agente"],
+            "nova_data": "",
+            "notif_sdr": None,
+        }
+
     try:
         resp_indef = _invocar_llm_instrucao(
             system_prompt,
@@ -497,8 +541,8 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             "e os dados do lead informados no system prompt (nunca invente valores, vagas ou horários). "
             "Se for pergunta sobre a unidade ou visita, use os dados do lead. "
             "NUNCA liste horários específicos nem afirme disponibilidade de datas — quem oferece "
-            "horários é o sistema, não você. Se o cliente quiser marcar, apenas convide-o a reagendar "
-            "(ex.: 'posso te enviar os horários disponíveis?'). "
+            "horários é o sistema, não você. Se o cliente quiser marcar, convide-o a reagendar "
+            "com a frase: 'posso te enviar os horários disponíveis?'. "
             "Responda de forma precisa e curta; depois redirecione para o reagendamento. "
             "Máximo 4 linhas, estilo WhatsApp.",
             lead_id,

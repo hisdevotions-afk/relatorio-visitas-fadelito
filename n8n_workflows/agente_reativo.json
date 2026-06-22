@@ -1,0 +1,538 @@
+{
+  "id": "fadelitoAgenteReativo",
+  "name": "Fadelito · Agente Reagendamento (Reativo)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reagendamento",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "id": "webhook-gupshup",
+      "name": "Webhook Gupshup",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "fadelito-reagendamento"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Parseia o webhook do Gupshup (formato Meta Cloud API) e o legado de simulação.\nconst raw = $input.first().json;\nconst payload = raw.body ?? raw;\n\nfunction norm(t) {\n  let d = String(t || '').replace(/\\D/g, '');\n  if (d && !d.startsWith('55')) d = '55' + d;\n  return d;\n}\n\nconst out = [];\nif (payload.entry) {\n  for (const e of payload.entry || []) {\n    for (const c of e.changes || []) {\n      if (c.field !== 'messages') continue;\n      for (const m of (c.value && c.value.messages) || []) {\n        if (m.type !== 'text') continue;\n        const text = (m.text && m.text.body) || '';\n        if (!text) continue;\n        out.push({ from: norm(m.from), text, message_id: m.id || '' });\n      }\n    }\n  }\n} else if (payload.type === 'message') {\n  const inner = payload.payload || {};\n  if (inner.type === 'text') {\n    const text = (inner.payload && inner.payload.text) || '';\n    if (text) out.push({ from: norm(inner.source), text, message_id: inner.id || '' });\n  }\n}\n// Sem mensagem de texto (ex.: evento de status) => não segue o fluxo.\nreturn out.map((o) => ({ json: o }));\n"
+      },
+      "id": "parse-gupshup",
+      "name": "Parse Gupshup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1hdQPqo3gjxckY-8O-R2IZZMIh9IU60x1tMSBjW2XFmw"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "=$now.format('dd/MM/yyyy')"
+        },
+        "options": {}
+      },
+      "id": "ler-aba-do-dia",
+      "name": "Ler Aba do Dia",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "fadelitoGoogle",
+          "name": "Fadelito Google Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Encontra a linha do lead pelo telefone (normalizado dos dois lados), como no Python.\nconst msg = $('Parse Gupshup').item.json;\nfunction norm(t) {\n  let d = String(t || '').replace(/\\D/g, '');\n  if (d && !d.startsWith('55')) d = '55' + d;\n  return d;\n}\nconst alvo = norm(msg.from);\nconst linhas = $input.all().map((i) => i.json);\nconst lead = linhas.find((l) => norm(l['Telefone']) === alvo);\nif (!lead) {\n  // número desconhecido: encerra sem responder\n  return [];\n}\nreturn [{\n  json: {\n    from: msg.from,\n    text: msg.text,\n    message_id: msg.message_id,\n    row_number: lead.row_number,\n    id: lead['ID'] || '',\n    nome: lead['Nome'] || '',\n    unidade: (lead['unidade_alvo'] || lead['Unidade'] || '').trim(),\n    unidade_original: lead['Unidade'] || '',\n    data_hora: lead['Data/Hora'] || '',\n    status: lead['Status'] || '',\n    status_agente: lead['status_agente'] || '',\n  },\n}];\n"
+      },
+      "id": "buscar-lead",
+      "name": "Buscar Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Próximos 5 dias úteis (sem fim de semana e feriados nacionais) + grade de horários.\n// Espelha disponibilidade.py (_proximos_dias_uteis, _gerar_slots_do_dia, feriados).\nconst SLOT_INICIO = '09:00';\nconst SLOT_FIM = '16:30';\nconst DURACAO = 60;\n\nfunction pascoa(ano) {\n  const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100;\n  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);\n  const g = Math.floor((b - f + 1) / 3);\n  const h = (19 * a + b - d - g + 15) % 30;\n  const i = Math.floor(c / 4), k = c % 4;\n  const l = (32 + 2 * e + 2 * i - h - k) % 7;\n  const m = Math.floor((a + 11 * h + 22 * l) / 451);\n  const mes = Math.floor((h + l - 7 * m + 114) / 31);\n  const dia = ((h + l - 7 * m + 114) % 31) + 1;\n  return new Date(Date.UTC(ano, mes - 1, dia));\n}\nfunction feriados(ano) {\n  const fix = [[1,1],[21,4],[1,5],[7,9],[12,10],[2,11],[15,11],[25,12]];\n  const s = new Set(fix.map(([d, m]) => `${ano}-${m}-${d}`));\n  const p = pascoa(ano);\n  const add = (off) => { const x = new Date(p); x.setUTCDate(x.getUTCDate() + off);\n    s.add(`${x.getUTCFullYear()}-${x.getUTCMonth() + 1}-${x.getUTCDate()}`); };\n  [-48, -47, -2, 60].forEach(add);\n  return s;\n}\nfunction isFeriado(dt) {\n  return feriados(dt.getUTCFullYear()).has(`${dt.getUTCFullYear()}-${dt.getUTCMonth() + 1}-${dt.getUTCDate()}`);\n}\nfunction slotsDoDia() {\n  const [hi, mi] = SLOT_INICIO.split(':').map(Number);\n  const [hf, mf] = SLOT_FIM.split(':').map(Number);\n  let a = hi * 60 + mi; const fim = hf * 60 + mf; const r = [];\n  while (a <= fim) { r.push(`${String(Math.floor(a / 60)).padStart(2,'0')}:${String(a % 60).padStart(2,'0')}`); a += DURACAO; }\n  return r;\n}\nconst DIAS_PT = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];\nconst dias = [];\nlet d = new Date(); d.setUTCHours(0,0,0,0); d.setUTCDate(d.getUTCDate() + 1);\nwhile (dias.length < 5) {\n  const wd = d.getUTCDay();\n  if (wd >= 1 && wd <= 5 && !isFeriado(d)) {\n    const iso = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;\n    dias.push({ iso, dia_semana: DIAS_PT[wd], dd: String(d.getUTCDate()).padStart(2,'0'), mm: String(d.getUTCMonth()+1).padStart(2,'0') });\n  }\n  d.setUTCDate(d.getUTCDate() + 1);\n}\nreturn [{ json: {\n  inicio: dias[0].iso,\n  fim: dias[dias.length - 1].iso,\n  dias,\n  slot_times: slotsDoDia(),\n  unidade: $('Buscar Lead').item.json.unidade,\n} }];\n"
+      },
+      "id": "janela-dias-uteis",
+      "name": "Janela Dias Uteis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://mora877.adm.gendo.app/api/agendamentos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "Inicio",
+              "value": "={{ $json.inicio }}"
+            },
+            {
+              "name": "Fim",
+              "value": "={{ $json.fim }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gendo-agendamentos",
+      "name": "Gendo Agendamentos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fadelitoGendo",
+          "name": "Fadelito Gendo (Bearer)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cruza a grade de horários com os agendamentos reais do Gendo p/ a unidade.\n// Espelha disponibilidade.py: 1 slot por dia (o primeiro livre), até 3 dias.\nconst janela = $('Janela Dias Uteis').item.json;\nconst resp = $input.first().json;\nconst agendamentos = Array.isArray(resp) ? resp : (resp.data || resp.body?.data || []);\n\n// Espelha Python: STATUS_OCUPADOS = {\"1\", \"2\", \"6\"}\nconst STATUS_OCUPADOS = new Set(['1', '2', '6']);\n\nfunction normU(s) {\n  return String(s || '')\n    .normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase().replace(/fadelito/g, '').replace(/v\\./g, 'vila').trim()\n    .replace(/\\s+/g, ' ');\n}\nconst alvo = normU(janela.unidade);\n\nfunction ocupadosDoDia(iso) {\n  const occ = new Set();\n  for (const a of agendamentos) {\n    const start = a.start || '';\n    if (!start.startsWith(iso)) continue;\n    if (alvo) {\n      const at = normU(a.atendente);\n      if (!at) continue;\n      if (!at.includes(alvo) && !alvo.includes(at)) continue;\n    }\n    const hora = start.slice(11, 16);\n    if (!hora) continue;\n    const st = String(a.status_agendamento ?? '');\n    const serv = a.servico;\n    if (STATUS_OCUPADOS.has(st) || serv === null || serv === undefined || serv === '') occ.add(hora);\n  }\n  return occ;\n}\n\n// 1 slot por dia (primeiro livre), até 3 dias — igual ao Python get_slots_disponiveis(n_opcoes=3)\nconst slots = [];\nfor (const dia of janela.dias) {\n  if (slots.length >= 3) break;\n  const occ = ocupadosDoDia(dia.iso);\n  for (const h of janela.slot_times) {\n    if (!occ.has(h)) {\n      slots.push({\n        data: dia.iso,\n        horario: h,\n        label: `${dia.dia_semana}, ${dia.dd}/${dia.mm} às ${h.slice(0,2)}h`\n      });\n      break; // só o primeiro livre de cada dia\n    }\n  }\n}\n\nconst texto = slots.length\n  ? slots.map((s, i) => `${i + 1}) ${s.label}  [data=${s.data} horario=${s.horario}]`).join('\\n')\n  : '(sem horários livres nos próximos dias úteis)';\nreturn [{ json: { slots, slots_texto: texto, total: slots.length } }];"
+      },
+      "id": "calcular-slots",
+      "name": "Calcular Slots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Buscar Lead').item.json.text }}",
+        "options": {
+          "systemMessage": "=Você é o agente de reagendamento de visitas da rede de escolas infantis Fadelito. Responda SEMPRE em português brasileiro informal, estilo WhatsApp: frases curtas, humano, empático, sem pressão. Emojis: evite no corpo; em saudação/despedida até 2 são ok.\n\n=== FADELITO — BASE DE CONHECIMENTO (RAG v2.0) ===\n\nPERFIL DO LEAD\nLeads mornos: já demonstraram interesse, agendaram visita, não compareceram ou cancelaram.\nNÃO precisam ser convencidos do zero — precisam ser reativados com leveza, sem pressão.\n\nOBJETIVO DO AGENTE\nPrincipal: reagendar a visita presencial à unidade Fadelito.\nNÃO FAZER: nova apresentação completa, negociações financeiras, pressionar, inventar informações, tentar fechar matrícula.\n\nTOM E ESTILO\nLeve, natural, humano, empático, frases curtas (estilo WhatsApp), direto, sem pressão.\nEvitar: textos longos, linguagem formal/institucional, tom de venda agressiva, múltiplas perguntas por mensagem, excesso de emojis.\n\nREGRAS ANTI-ALUCINAÇÃO (CRÍTICAS)\n- NUNCA inventar valores, mensalidades, promoções, vagas ou horários\n- NUNCA confirmar vaga sem verificar no sistema Gendo\n- NUNCA criar horários — usar apenas os fornecidos na mensagem\n- NUNCA informar nome da diretora (usar sempre \"a diretora\")\n- NUNCA prometer ou sugerir ligação telefônica — todo atendimento é feito pelo WhatsApp\n- Se não souber algo: \"Posso verificar isso para você com a equipe.\"\n- Negociações financeiras: SOMENTE presencialmente com a diretora\n\nSOBRE A FADELITO\n- Maior rede especializada em Berçário e Educação Infantil do Brasil (25+ anos)\n- Crianças de 4 meses (Berçário) até 6 anos (Pré)\n- São Paulo, Grande SP e Interior — sistema de ensino próprio, atualizado anualmente\n\nTURMAS\n- Berçário (4m–18m): Programa Baby Learning — cognitivo, motor, alimentação e amor\n- Minimaternal (até 3 anos): relações sociais, psicomotricidade, linguagem oral\n- Maternal I: ensino próprio + inglês (National Geographic ou CEL.LEP)\n- Maternal II: inglês diário + extracurriculares inclusas (Judô, Ballet, Arte, Mindfulness, Música, Culinária, Horticultura)\n- Jardim e Pré: todas as extracurriculares, preparação para alfabetização, inglês diário\n\nHORÁRIOS DE FUNCIONAMENTO\n- 4h30: 7h30–12h ou 13h–17h30\n- 4h (Perdizes, Guarulhos, Real Parque, Klabin): 8h–12h ou 13h–17h\n- 6h+: flexíveis, combinados na matrícula\n- Integral (12h): 7h–19h\n\nFINANCEIRO (contexto apenas — NÃO negociar)\n- Anuidade: 13 parcelas (13ª é reserva de vaga, pode ser parcelada em 2x R$1.050)\n- Alimentação: NÃO inclusa — aprox. R$14/refeição com pacotes mensais\n- Atividades extracurriculares: SEM custo adicional (inclusas no período)\n- Uniforme: fadelitostore.com.br\n- Novas unidades (São Caetano, Higienópolis): condições especiais de lançamento — mencionar APENAS se o lead perguntar\n- Qualquer negociação: presencialmente com a diretora\n\nUNIDADES E ENDEREÇOS (use SEMPRE estes endereços — nunca invente)\n- Aclimação: R. Loureiro da Cruz, 332\n- Anália Franco: R. Vilela, 872\n- Boa Vista: Rua Conde de Itu, 464\n- Bonfiglioli: Praça Isai Leirner, 164\n- Brooklin: Av. Professor Vicente Rao, 1208\n- Campinas: Av. Júlio de Mesquita, 594\n- Campo Belo: Rua Gil Eanes, 553\n- Guarulhos: R. Josephina Mandotti, 47\n- Granja Viana: R. Direita, 110 - Vila Santo Antônio\n- Higienópolis: R. Rosa e Silva, 270\n- Indianópolis: Av. Indianópolis, 977\n- Ipiranga: Rua Padre Marchetti, 378\n- Jardins: Alameda Casa Branca, 583\n- Klabin: R. Rodrigo Vieira, 315\n- Lapa: R. Espártaco, 215\n- Marajoara: Av. Washington Luís, 814\n- Moema: R. Inhambu, 891\n- Mooca: R. Teresina, 464\n- Osasco: Av. Santo Antônio, 1750\n- Panamby: R. José Ramon Urtiza, 835\n- Paraíso: R. Afonso de Freitas, 687\n- Perdizes: R. João Ramalho, 1063\n- Pinheiros: R. Francisco Leitão, 497\n- Piracicaba: Av. Torquato da Silva Leitão, 208\n- Portal do Morumbi: Rua Dr. Luiz Migliano, 425\n- Real Parque: Av. Morumbi, 6560\n- Santo André: R. das Monções, 345\n- São Caetano: R. Rafael Corrêa Sampaio, 99\n- Saúde: R. Gal. Chagas Santos, 301\n- Tatuapé: R. Ivaí, 187\n- Vila Gumercindo: Rua Assungui, 432\n- Vila Leopoldina: R. Aroaba, 155\n- Vila Madalena: R. das Tabocas, 170\n- Vila Mariana: R. Morgado de Mateus, 287\n- Vila Sônia: R. Cenobelino Serra, 71\n\nLINKS GOOGLE MAPS (enviar junto do endereço ao confirmar visita ou quando lead pedir localização)\n- Vila Leopoldina: https://maps.app.goo.gl/SWQb5PrjWYe176Dn8\n- Moema: https://maps.app.goo.gl/gLQDD9YbHnttF93V7\n- Pinheiros: https://maps.app.goo.gl/qxrXWfqD6YpQVHpN6\n- Vila Madalena: https://maps.app.goo.gl/jHGBwiC3H5DRrPwdA\n- Perdizes: https://maps.app.goo.gl/aiQPXHVNZpBmHtdf9\n- Jardins: https://maps.app.goo.gl/DPaeAWF7ne6Nihie6\n- Mooca: https://maps.app.goo.gl/rhowCo84Snraz49s5\n- Guarulhos: https://maps.app.goo.gl/Y1HTEN4k26s75VEG7\n- Campinas: https://maps.app.goo.gl/FKGtoGzsVtMaufoGA\n\nCENÁRIOS E RESPOSTAS MODELO\nLead não responde há dias:\n  Oi, [NOME]! Vi que você tinha uma visita com a gente, mas acabou não conseguindo vir. Ainda faz sentido conhecer a escola? Posso te ajudar com um novo horário.\n\nLead estava ocupado:\n  Imagino, a rotina acaba ficando corrida mesmo. Se fizer sentido, posso te sugerir um horário mais tranquilo para você essa semana.\n\nLead esfriou / sumiu:\n  Super entendo. Muitas famílias decidem melhor depois de conhecer o espaço pessoalmente. Se quiser, posso te ajudar a remarcar.\n\nLead comparando escolas:\n  Faz todo sentido comparar! A visita costuma ajudar bastante — você consegue sentir o ambiente e ver se faz sentido. Posso te sugerir alguns horários?\n\nLead menciona preço:\n  Entendo, é uma decisão importante mesmo. A visita ajuda porque você vê tudo de perto e a diretora apresenta as opções de valores. Posso te ajudar a remarcar?\n\nLead optou por outra escola:\n  Sem problemas, [NOME]! Se em algum momento fizer sentido, estaremos aqui. Poderia nos dizer o motivo? Muito obrigada e boa sorte!\n\nLead quer mais informações:\n  Posso verificar isso com a equipe para te dar uma resposta certinha. Mas o mais completo mesmo é a visita — você vê tudo de perto e a diretora responde cada detalhe. Que tal agendarmos?\n\nPerguntas fora do escopo:\n  Posso pedir para nossa equipe te explicar isso melhor.\n\nHANDOFF PARA SDR\nPassar para SDR quando: lead exige negociação financeira; reclamação sobre a escola;\nprefere atendimento mais pessoal (nunca prometer ligação — o SDR também atende via WhatsApp);\nresposta vaga após 2 rodadas; perguntas complexas sobre pedagogia/valores/vagas.\nFrase de handoff: \"Vou passar você para nossa equipe, que continua te ajudando aqui pelo WhatsApp.\"\n\n=== COMO AGIR (n8n) ===\n- Os ÚNICOS horários que você pode oferecer são os de \"HORÁRIOS DISPONÍVEIS REAIS\" abaixo. NUNCA invente outros.\n- Cada slot vem rotulado com [data=YYYY-MM-DD horario=HH:MM]. Ao confirmar, use ESSES valores exatos.\n- Quando o lead escolher um horário (por número, \"o primeiro\", ou dizendo data/hora), chame a tool\n  confirmar_agendamento(lead_id, data, horario). Só dê a visita como confirmada DEPOIS que a tool retornar sucesso.\n- Se o lead pedir OUTRA unidade: descubra qual e chame a tool consultar_horarios(unidade) para obter os\n  horários REAIS daquela unidade; então ofereça-os e siga o mesmo fluxo de confirmação. Use o endereço da\n  unidade conforme a lista de endereços da base (nunca invente endereço).\n- Mantenha o foco em reagendar. Respostas curtas, no máximo ~4 linhas.\n\n\n=== DADOS DO LEAD (esta conversa) ===\nNome: {{ $('Buscar Lead').item.json.nome }}\nPrimeiro nome: {{ $('Buscar Lead').item.json.nome.split(' ')[0] }}\nUnidade: Fadelito {{ $('Buscar Lead').item.json.unidade }}\nID do agendamento (lead_id p/ a tool confirmar_agendamento): {{ $('Buscar Lead').item.json.id }}\nVisita original: {{ $('Buscar Lead').item.json.data_hora }}\n\n=== HORÁRIOS DISPONÍVEIS REAIS — unidade do lead (use SOMENTE estes) ===\n{{ $('Calcular Slots').item.json.slots_texto }}\n"
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "id": "nvidia-nim",
+      "name": "NVIDIA NIM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatNvidia",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        220
+      ],
+      "credentials": {
+        "nvidiaApi": {
+          "id": "fadelitoNvidiaApi",
+          "name": "Fadelito NVIDIA NIM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Buscar Lead').item.json.from }}",
+        "contextWindowLength": 20
+      },
+      "id": "memória-por-telefone",
+      "name": "Memória por Telefone",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        1620,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "name": "confirmar_agendamento",
+        "description": "Cria o agendamento da visita no Gendo quando o lead escolhe um horário REAL da lista oferecida. Use EXATAMENTE o data (YYYY-MM-DD) e horario (HH:MM) do slot escolhido, e o lead_id dos dados do lead.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "fadelitoToolConfirmar"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $fromAI('lead_id', 'ID do agendamento original do lead', 'string') }}",
+            "data": "={{ $fromAI('data', 'Data escolhida no formato YYYY-MM-DD', 'string') }}",
+            "horario": "={{ $fromAI('horario', 'Horário escolhido no formato HH:MM', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "data",
+              "displayName": "data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "horario",
+              "displayName": "horario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      },
+      "id": "confirmar_agendamento",
+      "name": "confirmar_agendamento",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "name": "consultar_horarios",
+        "description": "Consulta os horários REAIS disponíveis de uma unidade Fadelito específica (nos próximos dias úteis). Use quando o lead pedir para visitar OUTRA unidade diferente da agendada. Passe o nome da unidade (ex.: 'Moema', 'Vila Madalena'). Retorna a lista de slots com [data=YYYY-MM-DD horario=HH:MM] para você oferecer.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "fadelitoToolHorarios"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "unidade": "={{ $fromAI('unidade', 'Nome da unidade Fadelito que o lead quer visitar', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "unidade",
+              "displayName": "unidade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        }
+      },
+      "id": "consultar_horarios",
+      "name": "consultar_horarios",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1900,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.gupshup.io/wa/api/v1/msg",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "channel",
+              "value": "whatsapp"
+            },
+            {
+              "name": "source",
+              "value": "5511966328404"
+            },
+            {
+              "name": "destination",
+              "value": "={{ $('Buscar Lead').item.json.from }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ JSON.stringify({ type: 'text', text: $('AI Agent').item.json.output }) }}"
+            },
+            {
+              "name": "src.name",
+              "value": "Number02"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "enviar-whatsapp",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1820,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fadelitoGupshup",
+          "name": "Fadelito Gupshup (apikey)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1hdQPqo3gjxckY-8O-R2IZZMIh9IU60x1tMSBjW2XFmw"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "=$now.format('dd/MM/yyyy')"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {
+            "row_number": "={{ $('Buscar Lead').item.json.row_number }}",
+            "status_agente": "em_conversa",
+            "ultima_tentativa": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "atualizar-lead",
+      "name": "Atualizar Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2040,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "fadelitoGoogle",
+          "name": "Fadelito Google Service Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Gupshup": {
+      "main": [
+        [
+          {
+            "node": "Parse Gupshup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gupshup": {
+      "main": [
+        [
+          {
+            "node": "Ler Aba do Dia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Aba do Dia": {
+      "main": [
+        [
+          {
+            "node": "Buscar Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lead": {
+      "main": [
+        [
+          {
+            "node": "Janela Dias Uteis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Janela Dias Uteis": {
+      "main": [
+        [
+          {
+            "node": "Gendo Agendamentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gendo Agendamentos": {
+      "main": [
+        [
+          {
+            "node": "Calcular Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Slots": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Atualizar Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVIDIA NIM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memória por Telefone": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "confirmar_agendamento": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "consultar_horarios": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

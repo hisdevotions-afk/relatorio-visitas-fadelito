@@ -2,6 +2,8 @@
 .env
 google_credentials.json
 *.json.bak
+.claude/settings.json
+n8n_workflows/credentials.json
 
 # Logs e relatórios gerados
 relatorios/
@@ -34,3 +36,4 @@ tallos_export/
 # OS
 .DS_Store
 Thumbs.db
+n8n_workflows/agente_reativo.withrag.json
