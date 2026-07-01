@@ -11,12 +11,19 @@ import agente
 import disponibilidade
 import prompts
 
+# Pool completo (vários dias) — get_slots_disponiveis deriva dele via escolher_diversos
 SLOTS_MOCK = [
     {"data": "2026-06-11", "horario": "09:00", "label": "quinta-feira, 11/06 às 09h00"},
     {"data": "2026-06-11", "horario": "14:00", "label": "quinta-feira, 11/06 às 14h00"},
     {"data": "2026-06-12", "horario": "10:00", "label": "sexta-feira, 12/06 às 10h00"},
+    {"data": "2026-06-12", "horario": "15:00", "label": "sexta-feira, 12/06 às 15h00"},
+    {"data": "2026-06-15", "horario": "09:00", "label": "segunda-feira, 15/06 às 09h00"},
 ]
-disponibilidade.get_slots_disponiveis = lambda n=3, unidade="": SLOTS_MOCK[:n]
+disponibilidade.slots_livres = lambda unidade="", dias=5: SLOTS_MOCK
+
+# As 3 opções exibidas devem cair em 3 dias DIFERENTES (erro histórico: mesmo dia)
+_top3 = disponibilidade.get_slots_disponiveis(3)
+assert len({s["data"] for s in _top3}) == 3, f"slots exibidos não diversificam dias: {_top3}"
 
 _contador = [0]
 
@@ -68,7 +75,8 @@ print("\n" + "=" * 70)
 print("CENÁRIO 3 — Fluxo completo: 1 → escolhe slot por posição")
 l = novo_lead()
 turno(l, "1")
-turno(l, "pode ser o primeiro horário")
+r = turno(l, "pode ser o primeiro horário")
+assert r["status_agente"] == "reagendado", f"esperava reagendado, veio {r['status_agente']}"
 
 print("\n" + "=" * 70)
 print("CENÁRIO 4 — '1' DEPOIS dos slots (deve ser CONFIRMOU_DATA, não loop)")
@@ -80,7 +88,8 @@ print("\n" + "=" * 70)
 print("CENÁRIO 4b — '2' DEPOIS dos slots (deve confirmar o 2º horário)")
 l = novo_lead()
 turno(l, "1")
-turno(l, "2")
+r = turno(l, "2")
+assert r["status_agente"] == "reagendado" and "12/06" in r["nova_data"], r
 
 print("\n" + "=" * 70)
 print("CENÁRIO 4c — '2' na PRIMEIRA resposta (deve ser RECUSOU)")
@@ -112,5 +121,39 @@ l["unidade_alvo"] = "Aclimação"  # simula persistência da coluna M entre roda
 turno(l, "pode ser o primeiro horário")                # confirma NA Aclimação
 
 print("\n" + "=" * 70)
+print("CENÁRIO 9 — Negocia DIA específico (sexta) e confirma slot fora do top-3")
+l = novo_lead()
+turno(l, "1")
+r = turno(l, "esses horários não dão pra mim, tem algum na sexta à tarde?")
+assert "15h00" in r["resposta"], f"negociação não ofereceu o slot de sexta 15h: {r['resposta']}"
+r = turno(l, "pode ser sexta às 15h")
+assert r["status_agente"] == "reagendado" and "15" in r["nova_data"], r
+
+print("\n" + "=" * 70)
+print("CENÁRIO 10 — 'o segundo horário' por extenso (ordinal ≠ segunda-feira)")
+l = novo_lead()
+turno(l, "1")
+r = turno(l, "pode ser o segundo horário")
+assert r["status_agente"] == "reagendado" and "12/06" in r["nova_data"], r
+
+print("\n" + "=" * 70)
+print("CENÁRIO 11 — Gendo FORA DO AR na criação (não pode confirmar ao lead)")
+import gendo
+config.set_dry_run(False)
+_orig_dados = gendo.get_agendamento_dados
+def _gendo_fora(_id):
+    raise RuntimeError("Gendo fora do ar (simulado)")
+gendo.get_agendamento_dados = _gendo_fora
+l = novo_lead()
+turno(l, "1")
+r = turno(l, "1")
+assert r["status_agente"] == "transferido_sdr", f"falha do Gendo deveria transferir ao SDR: {r}"
+assert "confirmada" not in r["resposta"].lower(), f"confirmou visita inexistente: {r['resposta']}"
+gendo.get_agendamento_dados = _orig_dados
+config.set_dry_run(True)
+
+print("\n" + "=" * 70)
 print("HISTÓRICO SERIALIZADO DO CENÁRIO 1 (verifica coluna L limpa):")
 print(agente.serializar_historico("T1"))
+
+print("\n✅ Todos os asserts determinísticos passaram.")

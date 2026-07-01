@@ -92,16 +92,15 @@ def _horarios_ocupados(dia: date, unidade: str = "") -> set[str]:
     return ocupados
 
 
-def get_slots_disponiveis(n_opcoes: int = 3, unidade: str = "") -> list[dict]:
-    """Retorna até n_opcoes slots livres nos próximos 5 dias úteis para a unidade indicada.
+def slots_livres(unidade: str = "", dias: int = 5) -> list[dict]:
+    """Retorna TODOS os slots livres (ordem cronológica) nos próximos `dias` dias úteis.
 
-    Formato: [{"data": "2025-05-05", "horario": "09:00", "label": "segunda-feira, 05/05 às 09h"}]
+    Formato: [{"data": "2025-05-05", "horario": "09:00", "label": "segunda-feira, 05/05 às 09h00"}]
     """
     slots_do_dia = _gerar_slots_do_dia()
-    dias = _proximos_dias_uteis(5)
     resultado = []
 
-    for dia in dias:
+    for dia in _proximos_dias_uteis(dias):
         ocupados = _horarios_ocupados(dia, unidade)
         dia_semana = DIAS_PT[dia.weekday()]
 
@@ -110,9 +109,33 @@ def get_slots_disponiveis(n_opcoes: int = 3, unidade: str = "") -> list[dict]:
                 resultado.append({
                     "data": dia.isoformat(),
                     "horario": horario,
-                    "label": f"{dia_semana}, {dia.strftime('%d/%m')} às {horario[:2]}h",
+                    "label": f"{dia_semana}, {dia.strftime('%d/%m')} às {horario.replace(':', 'h')}",
                 })
-                if len(resultado) >= n_opcoes:
-                    return resultado
 
     return resultado
+
+
+def escolher_diversos(slots: list[dict], n_opcoes: int = 3) -> list[dict]:
+    """Escolhe até n_opcoes slots espalhados por dias DIFERENTES (1º livre de cada dia).
+
+    Evita oferecer 3 horários do mesmo dia — se o dia não servir ao lead,
+    nenhuma opção serviria. Só repete dia quando não há dias distintos suficientes.
+    """
+    por_dia: dict[str, list[dict]] = {}
+    for s in slots:
+        por_dia.setdefault(s["data"], []).append(s)
+
+    escolhidos: list[dict] = []
+    rodada = 0
+    while len(escolhidos) < n_opcoes and any(rodada < len(v) for v in por_dia.values()):
+        for data in sorted(por_dia):
+            if rodada < len(por_dia[data]) and len(escolhidos) < n_opcoes:
+                escolhidos.append(por_dia[data][rodada])
+        rodada += 1
+
+    return sorted(escolhidos, key=lambda s: (s["data"], s["horario"]))
+
+
+def get_slots_disponiveis(n_opcoes: int = 3, unidade: str = "") -> list[dict]:
+    """Retorna até n_opcoes slots livres em dias diversificados para a unidade indicada."""
+    return escolher_diversos(slots_livres(unidade), n_opcoes)

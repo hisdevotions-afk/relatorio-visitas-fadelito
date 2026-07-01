@@ -149,16 +149,58 @@ def _classificar_resposta(mensagem: str, slots: list[dict], lead_id: str) -> tup
     return categoria, data_info
 
 
+_DIAS_IDX = {
+    "segunda-feira": 0, "terca": 1, "terça": 1, "quarta": 2,
+    "quinta": 3, "sexta": 4, "sabado": 5, "sábado": 5, "domingo": 6,
+}
+
+
+def _dia_semana_pedido(texto: str) -> int | None:
+    """Extrai o dia da semana citado no texto ("sexta", "sábado"...), se houver."""
+    t = (texto or "").lower()
+    for nome, idx in _DIAS_IDX.items():
+        if nome in t:
+            return idx
+    # "segunda" solta (sem -feira) só vale como dia se não for "segunda opção/horário"
+    if re.search(r"\bsegunda\b(?!\s*(op[çc][ãa]o|hor[áa]rio))", t):
+        return 0
+    return None
+
+
+def _filtrar_por_dia(slots: list[dict], weekday: int) -> list[dict]:
+    return [
+        s for s in slots
+        if datetime.strptime(s["data"], "%Y-%m-%d").weekday() == weekday
+    ]
+
+
+def _normalizar_horas(texto: str) -> str:
+    """Converte '9h', '09h00', '14h30' para o formato HH:MM usado nos slots."""
+    def _rep(m: re.Match) -> str:
+        return f"{int(m.group(1)):02d}:{m.group(2) or '00'}"
+    return re.sub(r"\b(\d{1,2})h(\d{2})?\b", _rep, texto or "")
+
+
 def _escolha_de_slot(mensagem: str, slots: list[dict], lead_id: str) -> dict | None:
-    """Detecta escolha de slot por número simples (ex.: "1", "2", "3").
+    """Detecta escolha de slot por número ("1") ou posição ("o primeiro horário").
 
     Só vale quando a última mensagem do agente apresentou horários — seja pela
     lista padrão ("horários disponíveis") ou pela resposta a uma negociação
     (que inclui os labels dos slots literalmente). Fora desse contexto, "1"/"2"
     são as opções reagendar/recusar do template.
     """
+    if not slots:
+        return None
+    idx = None
     m = re.fullmatch(r"\s*(\d)\s*[.!]?\s*", mensagem or "")
-    if not m or not slots:
+    if m:
+        idx = int(m.group(1)) - 1
+    else:
+        # ordinais por extenso; "segunda" (feminino) fica de fora — é dia da semana
+        m = re.search(r"\b(primeir[oa]|segundo|terceir[oa])\b", (mensagem or "").lower())
+        if m:
+            idx = {"p": 0, "s": 1, "t": 2}[m.group(1)[0]]
+    if idx is None:
         return None
     ultima = _ultima_mensagem_agente(lead_id)
     agente_ofereceu_horarios = (
@@ -167,11 +209,10 @@ def _escolha_de_slot(mensagem: str, slots: list[dict], lead_id: str) -> dict | N
     )
     if not agente_ofereceu_horarios:
         return None
-    idx = int(m.group(1)) - 1
     return slots[idx] if 0 <= idx < len(slots) else None
 
 
-def _encontrar_slot(data_info: str, slots: list[dict]) -> dict | None:
+def _encontrar_slot(data_info: str, slots: list[dict], mensagem: str = "") -> dict | None:
     """Tenta casar data_info com um slot disponível de forma ESTRITA.
 
     Retorna None quando não há correspondência concreta — NUNCA "chuta" slots[0].
@@ -180,6 +221,9 @@ def _encontrar_slot(data_info: str, slots: list[dict]) -> dict | None:
     """
     if not data_info:
         return None
+
+    # Normaliza "14h"/"09h00" → "14:00"/"09:00" (formato dos labels difere dos slots)
+    data_info = _normalizar_horas(data_info)
 
     # Tenta dd/mm/yyyy HH:MM (formato completo)
     match = re.search(r"(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})", data_info)
@@ -207,8 +251,12 @@ def _encontrar_slot(data_info: str, slots: list[dict]) -> dict | None:
         except ValueError:
             pass
 
+    # Se o lead citou dia da semana ("sexta às 10h"), restringe aos slots desse dia
+    weekday = _dia_semana_pedido(f"{data_info} {mensagem}")
+    candidatos = _filtrar_por_dia(slots, weekday) if weekday is not None else slots
+
     # Fallback: busca por horário (HH:MM) ou data ISO presente em data_info
-    for slot in slots:
+    for slot in candidatos:
         if slot["horario"] in data_info or slot["data"] in data_info:
             return slot
 
@@ -282,13 +330,21 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
     unidade = lead.get("unidade_alvo") or lead["unidade"]
     telefone = lead["telefone"]
     try:
-        slots = disponibilidade.get_slots_disponiveis(3, unidade)
+        # pool = TODOS os slots livres da janela (p/ negociação e confirmação);
+        # slots = 3 opções exibidas, diversificadas por dia
+        pool = disponibilidade.slots_livres(unidade)
     except Exception as exc:
         logger.aviso(f"Falha ao buscar slots (lead {lead_id}): {exc}")
-        slots = []
+        pool = []
+    slots = disponibilidade.escolher_diversos(pool, 3)
     system_prompt = rag.build_system_prompt(lead)
 
-    slot_direto = _escolha_de_slot(mensagem_cliente, slots, lead_id)
+    # Slots que o agente de fato ofereceu na última mensagem (lista padrão ou
+    # alternativas de negociação) — é contra eles que "1"/"o primeiro" resolve.
+    ultima = _ultima_mensagem_agente(lead_id)
+    oferecidos = [s for s in pool if s["label"] in ultima] or slots
+
+    slot_direto = _escolha_de_slot(mensagem_cliente, oferecidos, lead_id)
     if slot_direto:
         categoria = "CONFIRMOU_DATA"
         data_info = (
@@ -318,8 +374,10 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         }
 
     if "CONFIRMOU_DATA" in categoria:
-        # usa o slot escolhido de forma determinística, ou casa estritamente o data_info
-        slot = slot_direto or _encontrar_slot(data_info, slots)
+        # usa o slot escolhido de forma determinística, ou casa estritamente o
+        # data_info contra o POOL inteiro (o lead pode confirmar um horário
+        # negociado que não estava entre as 3 opções exibidas)
+        slot = slot_direto or _encontrar_slot(data_info, pool, mensagem_cliente)
 
         # sem horário concreto: NÃO confirma (evita alucinação) — reenvia as opções
         if not slot:
@@ -339,6 +397,7 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             }
 
         nova_data = data_info or slot.get("label", "")
+        aviso_cancelamento = ""
 
         if slot and not config.DRY_RUN:
             try:
@@ -362,10 +421,22 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
                     data=slot["data"],
                     horario=slot["horario"],
                 )
-                gendo.atualizar_status(lead_id, "7")  # 7 = Cancelado (substituído)
+                if not novo:
+                    raise RuntimeError("resposta vazia da Gendo ao criar o agendamento")
                 logger.info(f"Novo agendamento criado: ID {novo.get('id')} | unidade '{unidade}'")
             except Exception as exc:
-                logger.aviso(f"Falha ao criar agendamento no Gendo: {exc}")
+                # NÃO confirma ao lead uma visita que não foi criada — transfere ao SDR
+                logger.erro(f"Falha ao criar agendamento no Gendo (lead {lead_id}): {exc}")
+                return _fallback_handoff(
+                    lead, f"falha ao criar agendamento {nova_data} na unidade {unidade}: {exc}"
+                )
+            try:
+                gendo.atualizar_status(lead_id, "7")  # 7 = Cancelado (substituído)
+            except Exception as exc:
+                logger.aviso(f"Falha ao cancelar agendamento antigo {lead_id}: {exc}")
+                aviso_cancelamento = (
+                    f" | ⚠️ cancelar a visita antiga (ID {lead_id}) falhou — cancelar no Gendo"
+                )
         elif slot and config.DRY_RUN:
             logger.info(
                 f"[DRY-RUN] Seria criado agendamento no Gendo: {slot['data']} {slot['horario']}"
@@ -386,7 +457,7 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             "nova_data": nova_data,
             "notif_sdr": prompts.NOTIF_SDR_REAGENDADO.format(
                 nome=nome, data_hora=nova_data, unidade=unidade, telefone=telefone
-            ),
+            ) + aviso_cancelamento,
         }
 
     if "QUER_OUTRA_UNIDADE" in categoria:
@@ -492,7 +563,12 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         }
 
     if "QUER_NEGOCIAR" in categoria:
-        opcoes_alt = "\n".join(f"- {s['label']}" for s in slots)
+        # Se o lead pediu um dia específico ("só consigo sexta"), oferece os
+        # slots REAIS daquele dia (do pool completo), não os 3 padrão.
+        weekday = _dia_semana_pedido(f"{mensagem_cliente} {data_info}")
+        pool_dia = _filtrar_por_dia(pool, weekday) if weekday is not None else []
+        alternativas = disponibilidade.escolher_diversos(pool_dia, 3) if pool_dia else slots
+        opcoes_alt = "\n".join(f"- {s['label']}" for s in alternativas)
         preferencia = data_info or "outro horário"
         try:
             msg_neg = _invocar_llm_instrucao(
