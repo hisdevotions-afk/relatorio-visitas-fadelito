@@ -99,6 +99,16 @@ def _ultima_mensagem_agente(lead_id: str) -> str:
     )
 
 
+def _eh_template_inicial(ultima: str) -> bool:
+    """Confere se a última fala do agente foi o template fixo da tentativa 1
+    (nunca passa por LLM — texto 100% previsível). Usado como ALLOWLIST: só
+    tratamos "1"/"2" como reagendar/recusar quando temos certeza de que é
+    ISSO que foi perguntado, nunca por dedução de que "não parece outra
+    coisa" (as tentativas 2/3 são geradas pelo LLM e parafraseiam à vontade —
+    ver _ofereceu_lista_opcoes)."""
+    return "Quero reagendar" in ultima and "Optei por outra escola" in ultima
+
+
 def _classificar_deterministico(mensagem: str, lead_id: str) -> str | None:
     """Classifica respostas óbvias SEM depender do LLM (caminho crítico à prova de falha).
 
@@ -108,8 +118,7 @@ def _classificar_deterministico(mensagem: str, lead_id: str) -> str | None:
     m = re.fullmatch(r"\s*([12])\s*[.!]?\s*", mensagem or "")
     if not m:
         return None
-    # só vale como opção do template se a última fala do agente NÃO foi a lista de horários
-    if "horários disponíveis" in _ultima_mensagem_agente(lead_id):
+    if not _eh_template_inicial(_ultima_mensagem_agente(lead_id)):
         return None
     return "QUER_REAGENDAR" if m.group(1) == "1" else "RECUSOU"
 
@@ -201,13 +210,25 @@ def _normalizar_horas(texto: str) -> str:
     return re.sub(r"\b(\d{1,2})h(\d{2})?\b", _rep, texto or "")
 
 
+def _ofereceu_lista_opcoes(ultima: str) -> bool:
+    """Detecta se a última mensagem do agente apresentou uma lista de opções
+    numerada ou com marcadores (ex.: "1) ..." ou "- ...").
+
+    Estrutural, não por frase fixa: as tentativas 2/3 (e as respostas de
+    negociação) passam pelo LLM, que parafraseia à vontade — nunca garante
+    dizer "horários disponíveis" nem reproduz os labels dos slots ao pé da
+    letra (ex.: "09h00" virou "09h" numa resposta real). Checar o FORMATO da
+    lista (que o prompt sempre pede) é o que realmente se sustenta.
+    """
+    return bool(re.search(r"(?m)^\s*(?:[123][).-]|-)\s", ultima or ""))
+
+
 def _escolha_de_slot(mensagem: str, slots: list[dict], lead_id: str) -> dict | None:
     """Detecta escolha de slot por número ("1") ou posição ("o primeiro horário").
 
-    Só vale quando a última mensagem do agente apresentou horários — seja pela
-    lista padrão ("horários disponíveis") ou pela resposta a uma negociação
-    (que inclui os labels dos slots literalmente). Fora desse contexto, "1"/"2"
-    são as opções reagendar/recusar do template.
+    Só vale quando a última mensagem do agente apresentou uma lista de opções
+    (slots ou negociação). Fora desse contexto, "1"/"2" são as opções
+    reagendar/recusar do template (ver _eh_template_inicial).
     """
     if not slots:
         return None
@@ -222,12 +243,7 @@ def _escolha_de_slot(mensagem: str, slots: list[dict], lead_id: str) -> dict | N
             idx = {"p": 0, "s": 1, "t": 2}[m.group(1)[0]]
     if idx is None:
         return None
-    ultima = _ultima_mensagem_agente(lead_id)
-    agente_ofereceu_horarios = (
-        "horários disponíveis" in ultima
-        or any(s["label"] in ultima for s in slots)
-    )
-    if not agente_ofereceu_horarios:
+    if not _ofereceu_lista_opcoes(_ultima_mensagem_agente(lead_id)):
         return None
     return slots[idx] if 0 <= idx < len(slots) else None
 

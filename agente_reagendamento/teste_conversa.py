@@ -137,6 +137,28 @@ r = turno(l, "pode ser o segundo horário")
 assert r["status_agente"] == "reagendado" and "12/06" in r["nova_data"], r
 
 print("\n" + "=" * 70)
+print("CENÁRIO 11b — '2' após tentativa 2/3 parafraseada pelo LLM (bug real: "
+      "vinha classificando como RECUSOU por não dizer 'horários disponíveis')")
+l = novo_lead()
+# Não passa pelo gerador de tentativa — simula o texto que o LLM realmente
+# mandou numa conversa real (paráfrase livre, lista numerada, sem a frase
+# fixa "horários disponíveis" e sem reproduzir os labels ao pé da letra).
+agente.registrar_mensagem_agente(l["id"], (
+    "Oi, Roberto! Vi que você tinha uma visita agendada, mas acabou não "
+    "conseguindo vir. Ainda faz sentido conhecer a escola?\n\n"
+    "Tenho estas opções disponíveis:\n"
+    "1) quinta-feira, 11/06 às 09h\n"
+    "2) sexta-feira, 12/06 às 10h\n"
+    "3) segunda-feira, 15/06 às 09h\n\n"
+    "Qual funciona melhor pra você?"
+))
+r = turno(l, "2")
+assert r["status_agente"] == "reagendado", (
+    f"lead escolheu o 2º horário mas foi tratado como recusa: {r}"
+)
+assert "12/06" in r["nova_data"], r
+
+print("\n" + "=" * 70)
 print("CENÁRIO 11 — Gendo FORA DO AR na criação (não pode confirmar ao lead)")
 import gendo
 config.set_dry_run(False)
