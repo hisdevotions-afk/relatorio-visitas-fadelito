@@ -28,6 +28,12 @@ def _norm(s: str) -> str:
     return " ".join(base.split())
 
 
+def normalizar(s: str) -> str:
+    """Normalização pública p/ comparar nomes de unidade vindos de fontes diferentes
+    (Sheets vs Gendo) sem depender de igualdade exata de string."""
+    return _norm(s)
+
+
 def _carregar() -> dict[str, int]:
     """Lê agendamentos recentes e extrai {atendente: id_responsavel}."""
     ini = (date.today() - timedelta(days=60)).isoformat()

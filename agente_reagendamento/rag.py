@@ -326,16 +326,22 @@ def _sem_acento(s: str) -> str:
     ).lower()
 
 
-def resolver_unidade(texto: str) -> str | None:
+def resolver_unidade(texto: str, excluir: str | None = None) -> str | None:
     """Identifica o nome canônico de uma unidade citada no texto do lead.
 
     Casa de forma acento/maiúscula-insensível, do nome mais longo para o mais
     curto (evita "Vila" casar antes de "Vila Madalena"). Retorna None se nada casar.
+
+    `excluir` ignora a unidade atual do lead quando ela aparece só como
+    referência (ex.: "outra unidade mais próxima de Marajoara" não deve
+    resolver para a própria Marajoara).
     """
     alvo = _sem_acento(texto)
     if not alvo:
         return None
+    alvo_excluir = _sem_acento(excluir) if excluir else None
     for nome in sorted(UNIDADES, key=len, reverse=True):
-        if _sem_acento(nome) in alvo:
+        nome_norm = _sem_acento(nome)
+        if nome_norm in alvo and nome_norm != alvo_excluir:
             return nome
     return None

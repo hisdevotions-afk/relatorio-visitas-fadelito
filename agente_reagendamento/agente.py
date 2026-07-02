@@ -174,6 +174,26 @@ def _filtrar_por_dia(slots: list[dict], weekday: int) -> list[dict]:
     ]
 
 
+def _periodo_pedido(texto: str) -> str | None:
+    """Extrai preferência de período ("de manhã"/"à tarde") citada no texto, se houver.
+
+    Usa \\b para não casar "manhã" dentro de "amanhã".
+    """
+    t = (texto or "").lower()
+    if re.search(r"\btarde\b", t):
+        return "tarde"
+    if re.search(r"\bmanh[ãa]\b", t):
+        return "manha"
+    return None
+
+
+def _filtrar_por_periodo(slots: list[dict], periodo: str) -> list[dict]:
+    corte = "12:00"
+    if periodo == "manha":
+        return [s for s in slots if s["horario"] < corte]
+    return [s for s in slots if s["horario"] >= corte]
+
+
 def _normalizar_horas(texto: str) -> str:
     """Converte '9h', '09h00', '14h30' para o formato HH:MM usado nos slots."""
     def _rep(m: re.Match) -> str:
@@ -460,8 +480,17 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             ) + aviso_cancelamento,
         }
 
-    if "QUER_OUTRA_UNIDADE" in categoria:
-        canonica = rag.resolver_unidade(mensagem_cliente)
+    # Negociação que na verdade nomeia uma unidade diferente da rastreada
+    # ("um horário de tarde na Campo Belo") é tratada como troca de unidade —
+    # senão o lead cai numa negociação que ignora silenciosamente o pedido
+    # real e força o LLM a "inventar" resposta sem dado nenhum (ver abaixo).
+    _unidade_negociada = (
+        rag.resolver_unidade(mensagem_cliente, excluir=unidade)
+        if "QUER_NEGOCIAR" in categoria else None
+    )
+
+    if "QUER_OUTRA_UNIDADE" in categoria or _unidade_negociada:
+        canonica = _unidade_negociada or rag.resolver_unidade(mensagem_cliente, excluir=unidade)
 
         # Lead pediu outra unidade mas não disse qual → pergunta qual
         if not canonica:
@@ -489,7 +518,10 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
             }
 
         # Mesma unidade já agendada → trata como pedido normal de reagendamento
-        if nova_unidade.lower() == unidade.lower():
+        # (normaliza acento/abreviação: Gendo e Sheets podem grafar a unidade
+        # de forma diferente — "V. Madalena" vs "Vila Madalena" — e uma
+        # comparação de string crua deixaria passar como "unidade diferente")
+        if unidades.normalizar(nova_unidade) == unidades.normalizar(unidade):
             opcoes_labels = [s["label"] for s in slots]
             while len(opcoes_labels) < 3:
                 opcoes_labels.append("(sem disponibilidade)")
@@ -505,9 +537,17 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
                 "notif_sdr": None,
             }
 
-        # Consulta a disponibilidade REAL da nova unidade na Gendo
+        # Consulta a disponibilidade REAL da nova unidade na Gendo — respeitando
+        # dia/período citados junto do pedido de unidade ("terça de tarde na Campo Belo")
+        weekday = _dia_semana_pedido(f"{mensagem_cliente} {data_info}")
+        periodo = _periodo_pedido(f"{mensagem_cliente} {data_info}")
         try:
-            slots_nova = disponibilidade.get_slots_disponiveis(3, nova_unidade)
+            pool_nova = disponibilidade.slots_livres(nova_unidade)
+            if weekday is not None:
+                pool_nova = _filtrar_por_dia(pool_nova, weekday)
+            if periodo:
+                pool_nova = _filtrar_por_periodo(pool_nova, periodo)
+            slots_nova = disponibilidade.escolher_diversos(pool_nova, 3)
         except Exception as exc:
             logger.aviso(f"Falha ao buscar slots da unidade {nova_unidade} (lead {lead_id}): {exc}")
             slots_nova = []
@@ -563,11 +603,34 @@ def processar_resposta_cliente(lead: dict, mensagem_cliente: str) -> dict:
         }
 
     if "QUER_NEGOCIAR" in categoria:
-        # Se o lead pediu um dia específico ("só consigo sexta"), oferece os
-        # slots REAIS daquele dia (do pool completo), não os 3 padrão.
+        # Se o lead pediu um dia e/ou período específico ("só consigo sexta de
+        # tarde"), oferece os slots REAIS filtrados (do pool completo), não os
+        # 3 padrão — sem filtro nenhum, "de tarde" era simplesmente ignorado.
         weekday = _dia_semana_pedido(f"{mensagem_cliente} {data_info}")
-        pool_dia = _filtrar_por_dia(pool, weekday) if weekday is not None else []
-        alternativas = disponibilidade.escolher_diversos(pool_dia, 3) if pool_dia else slots
+        periodo = _periodo_pedido(f"{mensagem_cliente} {data_info}")
+        if weekday is not None or periodo:
+            candidatos = _filtrar_por_dia(pool, weekday) if weekday is not None else pool
+            if periodo:
+                candidatos = _filtrar_por_periodo(candidatos, periodo)
+            alternativas = disponibilidade.escolher_diversos(candidatos, 3)
+        else:
+            alternativas = slots
+
+        # Sem NENHUM horário real pra oferecer: nunca manda o LLM "incluir
+        # literalmente" uma lista vazia — sem dado pra copiar, ele inventa
+        # (horário fictício ou uma desculpa tipo "problema técnico"). Aqui a
+        # resposta honesta e determinística é o próprio caminho já usado
+        # quando uma unidade pedida não tem vaga.
+        if not alternativas:
+            resposta = prompts.MSG_OUTRA_UNIDADE_SEM_SLOTS.format(unidade=unidade)
+            registrar_mensagem_agente(lead_id, resposta)
+            return {
+                "resposta": resposta,
+                "status_agente": "transferido_sdr",
+                "nova_data": "",
+                "notif_sdr": prompts.NOTIF_SDR_LIGAR.format(nome=nome, unidade=unidade, telefone=telefone),
+            }
+
         opcoes_alt = "\n".join(f"- {s['label']}" for s in alternativas)
         preferencia = data_info or "outro horário"
         try:
