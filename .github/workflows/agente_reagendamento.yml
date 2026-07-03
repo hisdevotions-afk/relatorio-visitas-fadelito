@@ -1,8 +1,10 @@
 name: Agente Reagendamento
 
 on:
-  schedule:
-    - cron: '30 13 * * 1-5'  # 10h30 Brasília (UTC-3), segunda a sexta
+  # Cron desligado em 2026-07-03: fluxo proativo migrado para n8n
+  # (workflow "Fadelito · Agente Reagendamento (Proativo)", id NKbcQq9hQu4kHLfh).
+  # Rodar os dois em paralelo duplicaria as mensagens enviadas aos leads.
+  # workflow_dispatch continua disponível para rodar manualmente se precisar.
   workflow_dispatch:
     inputs:
       tab:
